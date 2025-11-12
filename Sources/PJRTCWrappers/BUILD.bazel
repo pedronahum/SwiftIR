@@ -1,0 +1,16 @@
+# Bazel BUILD file for PJRTProtoHelper
+# This uses XLA's build system to correctly handle all dependencies
+
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+cc_library(
+    name = "pjrt_proto_helper",
+    srcs = ["PJRTProtoHelper.cpp"],
+    hdrs = ["include/PJRTProtoHelper.h"],
+    deps = [
+        "@xla//xla/pjrt/proto:compile_options_proto_cc",
+    ],
+    copts = ["-std=c++17"],
+    linkshared = True,
+    visibility = ["//visibility:public"],
+)

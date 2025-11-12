@@ -1,0 +1,239 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v0.1.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      version: ${{ steps.get_version.outputs.version }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Get full history for changelog
+
+      - name: Get Version
+        id: get_version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate Changelog
+        id: changelog
+        run: |
+          # Get changes since last tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+
+          if [ -z "$PREV_TAG" ]; then
+            echo "First release - showing all commits"
+            CHANGELOG=$(git log --pretty=format:"- %s (%h)" --reverse)
+          else
+            echo "Changes since $PREV_TAG"
+            CHANGELOG=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)")
+          fi
+
+          # Save to file
+          cat > /tmp/changelog.md << 'EOF'
+          ## What's Changed
+
+          $CHANGELOG
+
+          ## Installation
+
+          Add SwiftIR to your Swift package:
+
+          ```swift
+          dependencies: [
+              .package(url: "https://github.com/pedronahum/SwiftIR.git", from: "${{ steps.get_version.outputs.version }}")
+          ]
+          ```
+
+          ## Documentation
+
+          - [Main README](https://github.com/pedronahum/SwiftIR/blob/main/README.md)
+          - [Architecture Overview](https://github.com/pedronahum/SwiftIR/blob/main/Sources/README.md)
+          - [GPU Lowering Roadmap](https://github.com/pedronahum/SwiftIR/blob/main/GPU_LOWERING_ROADMAP.md)
+          - [Examples](https://github.com/pedronahum/SwiftIR/tree/main/Examples)
+
+          ## Requirements
+
+          - Swift 6.0+
+          - macOS 14.0+ (for development)
+          - MLIR/LLVM (via StableHLO or full LLVM build)
+          - XLA/PJRT libraries (for runtime execution)
+
+          ## Quick Start
+
+          See the [Quick Win Example](https://github.com/pedronahum/SwiftIR#quick-win-example) in the README for the fastest way to get started.
+
+          ## Support
+
+          - **Issues**: [GitHub Issues](https://github.com/pedronahum/SwiftIR/issues)
+          - **Discussions**: [GitHub Discussions](https://github.com/pedronahum/SwiftIR/discussions)
+          - **Swift Forums**: [Swift.org Forums](https://forums.swift.org/)
+
+          ---
+
+          **Created by [@pedronahum](https://github.com/pedronahum)** | Research project exploring modern Swift for ML compiler construction
+          EOF
+
+          echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
+          cat /tmp/changelog.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.get_version.outputs.version }}
+          release_name: SwiftIR ${{ steps.get_version.outputs.version }}
+          body: ${{ steps.changelog.outputs.CHANGELOG }}
+          draft: false
+          prerelease: ${{ contains(steps.get_version.outputs.version, 'alpha') || contains(steps.get_version.outputs.version, 'beta') || contains(steps.get_version.outputs.version, 'rc') }}
+
+  build-release-artifacts:
+    name: Build Release Artifacts
+    needs: create-release
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Create Source Archive
+        run: |
+          VERSION=${{ needs.create-release.outputs.version }}
+          ARCHIVE_NAME="SwiftIR-${VERSION}-source.tar.gz"
+
+          # Create clean archive excluding build artifacts
+          tar --exclude='.build' \
+              --exclude='.git' \
+              --exclude='.github/workflows' \
+              --exclude='*.xcodeproj' \
+              -czf "$ARCHIVE_NAME" .
+
+          echo "Created $ARCHIVE_NAME"
+          ls -lh "$ARCHIVE_NAME"
+
+      - name: Generate Checksums
+        run: |
+          VERSION=${{ needs.create-release.outputs.version }}
+          ARCHIVE_NAME="SwiftIR-${VERSION}-source.tar.gz"
+
+          # Generate SHA256 checksum
+          shasum -a 256 "$ARCHIVE_NAME" > "${ARCHIVE_NAME}.sha256"
+
+          echo "Checksums:"
+          cat "${ARCHIVE_NAME}.sha256"
+
+      - name: Upload Source Archive
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: ./SwiftIR-${{ needs.create-release.outputs.version }}-source.tar.gz
+          asset_name: SwiftIR-${{ needs.create-release.outputs.version }}-source.tar.gz
+          asset_content_type: application/gzip
+
+      - name: Upload Checksum
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: ./SwiftIR-${{ needs.create-release.outputs.version }}-source.tar.gz.sha256
+          asset_name: SwiftIR-${{ needs.create-release.outputs.version }}-source.tar.gz.sha256
+          asset_content_type: text/plain
+
+  update-documentation:
+    name: Update Documentation
+    needs: [create-release, build-release-artifacts]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Update Version Badge
+        run: |
+          VERSION=${{ needs.create-release.outputs.version }}
+
+          # Update version in README badge
+          sed -i "s|badge/swift-[0-9.]*-orange|badge/swift-6.0-orange|g" README.md
+          sed -i "s|from:.*\")$|from: \"$VERSION\")|g" README.md
+
+          echo "Updated version references to $VERSION"
+
+      - name: Create Documentation Update PR
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "docs: Update version to ${{ needs.create-release.outputs.version }}"
+          title: "Update documentation for ${{ needs.create-release.outputs.version }}"
+          body: |
+            Automated documentation update for release ${{ needs.create-release.outputs.version }}
+
+            - Updates version badges
+            - Updates installation instructions
+
+            **Note**: This PR is auto-generated. Please review before merging.
+          branch: docs/version-${{ needs.create-release.outputs.version }}
+          delete-branch: true
+
+  notify-release:
+    name: Notify Release
+    needs: [create-release, build-release-artifacts, update-documentation]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Release Summary
+        run: |
+          cat << 'EOF' >> $GITHUB_STEP_SUMMARY
+          # SwiftIR Release ${{ needs.create-release.outputs.version }}
+
+          ## Release Created
+          ✅ GitHub Release: https://github.com/pedronahum/SwiftIR/releases/tag/${{ needs.create-release.outputs.version }}
+
+          ## Artifacts
+          - ✅ Source archive uploaded
+          - ✅ SHA256 checksums generated
+          - ✅ Documentation update PR created
+
+          ## Next Steps
+          1. Verify release notes on GitHub
+          2. Review documentation update PR
+          3. Announce release on Swift Forums
+          4. Update project board/milestones
+
+          ## Installation
+          Users can now install this version with:
+          ```swift
+          .package(url: "https://github.com/pedronahum/SwiftIR.git", from: "${{ needs.create-release.outputs.version }}")
+          ```
+          EOF

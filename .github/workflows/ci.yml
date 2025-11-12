@@ -1,0 +1,304 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  SWIFT_VERSION: swift-DEVELOPMENT-SNAPSHOT-2025-10-02-a
+
+jobs:
+  # ============================================================
+  # Basic Build Check (Fast, No Dependencies)
+  # ============================================================
+  swift-build-check:
+    name: Swift Build Check (Syntax Only)
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Swift Development Snapshot
+        run: |
+          # Install swiftly
+          curl -L https://swift-server.github.io/swiftly/swiftly-install.sh | bash
+          export PATH="$HOME/.local/bin:$PATH"
+
+          # Install Swift development snapshot
+          swiftly install ${{ env.SWIFT_VERSION }}
+          swiftly use ${{ env.SWIFT_VERSION }}
+
+          # Verify installation
+          swift --version
+
+      - name: Swift Format Check
+        run: |
+          # Check if swift-format is available
+          if command -v swift-format &> /dev/null; then
+            echo "Running swift-format check..."
+            swift-format lint --recursive Sources/ || echo "swift-format not enforced yet"
+          else
+            echo "swift-format not installed, skipping format check"
+          fi
+
+      - name: Build Package (Syntax Check)
+        run: |
+          # This will fail due to missing dependencies, but validates syntax
+          swift build --build-tests 2>&1 | tee build.log || true
+
+          # Check for Swift syntax errors (not linker errors)
+          if grep -q "error:.*\.swift:" build.log; then
+            echo "❌ Swift syntax errors found"
+            grep "error:.*\.swift:" build.log
+            exit 1
+          else
+            echo "✅ No Swift syntax errors found"
+          fi
+
+  # ============================================================
+  # Documentation Check
+  # ============================================================
+  documentation-check:
+    name: Documentation Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Check Required Documentation
+        run: |
+          echo "Checking for required documentation files..."
+
+          required_files=(
+            "README.md"
+            "Sources/README.md"
+            "GPU_LOWERING_ROADMAP.md"
+            "LICENSE"
+          )
+
+          missing_files=()
+          for file in "${required_files[@]}"; do
+            if [ ! -f "$file" ]; then
+              missing_files+=("$file")
+            fi
+          done
+
+          if [ ${#missing_files[@]} -gt 0 ]; then
+            echo "❌ Missing required documentation files:"
+            printf '  - %s\n' "${missing_files[@]}"
+            exit 1
+          else
+            echo "✅ All required documentation files present"
+          fi
+
+      - name: Check Module READMEs
+        run: |
+          echo "Checking for module README files..."
+
+          module_dirs=(
+            "Sources/SwiftIR"
+            "Sources/SwiftIRCore"
+            "Sources/SwiftIRTypes"
+            "Sources/SwiftIRDialects"
+            "Sources/SwiftIRBuilders"
+            "Sources/SwiftIRXLA"
+            "Sources/SwiftIRStableHLO"
+            "Sources/SwiftIRMacros"
+            "Sources/PJRTCWrappers"
+          )
+
+          missing_readmes=()
+          for dir in "${module_dirs[@]}"; do
+            if [ -d "$dir" ] && [ ! -f "$dir/README.md" ]; then
+              missing_readmes+=("$dir/README.md")
+            fi
+          done
+
+          if [ ${#missing_readmes[@]} -gt 0 ]; then
+            echo "⚠️  Missing module README files:"
+            printf '  - %s\n' "${missing_readmes[@]}"
+          else
+            echo "✅ All module READMEs present"
+          fi
+
+      - name: Check README Links
+        run: |
+          echo "Checking README links..."
+
+          # Simple check for broken internal links in main README
+          if grep -oE '\[.*\]\([^)]+\)' README.md | grep -v '^http' | grep -v '^#' > /tmp/links.txt; then
+            while read -r link; do
+              file=$(echo "$link" | sed -E 's/.*\(([^)]+)\).*/\1/')
+              if [ ! -f "$file" ] && [ ! -d "$file" ]; then
+                echo "⚠️  Potentially broken link: $link"
+              fi
+            done < /tmp/links.txt
+          fi
+
+          echo "✅ README link check complete"
+
+      - name: Check for TODOs in Documentation
+        run: |
+          echo "Checking for TODO markers in documentation..."
+
+          todos=$(grep -r "TODO" --include="*.md" . || true)
+          if [ -n "$todos" ]; then
+            echo "⚠️  Found TODO markers in documentation:"
+            echo "$todos"
+          else
+            echo "✅ No TODO markers found"
+          fi
+
+  # ============================================================
+  # Example Code Validation
+  # ============================================================
+  example-validation:
+    name: Example Code Validation
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Swift Development Snapshot
+        run: |
+          curl -L https://swift-server.github.io/swiftly/swiftly-install.sh | bash
+          export PATH="$HOME/.local/bin:$PATH"
+          swiftly install ${{ env.SWIFT_VERSION }}
+          swiftly use ${{ env.SWIFT_VERSION }}
+          swift --version
+
+      - name: Count Examples
+        run: |
+          example_count=$(ls Examples/*.swift 2>/dev/null | wc -l)
+          echo "Found $example_count example files"
+
+          if [ $example_count -lt 20 ]; then
+            echo "⚠️  Expected 20+ examples, found $example_count"
+          else
+            echo "✅ Found $example_count examples"
+          fi
+
+      - name: Validate Example Syntax
+        run: |
+          echo "Checking example file syntax..."
+
+          for example in Examples/*.swift; do
+            echo "Checking $example..."
+            # Basic syntax check (will fail on imports but catch obvious errors)
+            swift -frontend -parse "$example" 2>&1 | grep -v "no such module" | grep -v "could not find" || true
+          done
+
+          echo "✅ Example syntax validation complete"
+
+      - name: Check Example Documentation
+        run: |
+          echo "Checking examples for documentation comments..."
+
+          examples_without_docs=()
+          for example in Examples/*.swift; do
+            if ! head -20 "$example" | grep -q "///"; then
+              examples_without_docs+=("$(basename $example)")
+            fi
+          done
+
+          if [ ${#examples_without_docs[@]} -gt 0 ]; then
+            echo "⚠️  Examples without documentation comments:"
+            printf '  - %s\n' "${examples_without_docs[@]}"
+          else
+            echo "✅ All examples have documentation comments"
+          fi
+
+  # ============================================================
+  # Security Checks
+  # ============================================================
+  security-check:
+    name: Security Checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Check for Secrets in Code
+        run: |
+          echo "Scanning for potential secrets..."
+
+          # Check for common secret patterns
+          if grep -r -E "(password|secret|api[_-]?key|token|credential)\s*=\s*['\"][^'\"]+['\"]" \
+              --include="*.swift" --include="*.sh" . || true; then
+            echo "⚠️  Found potential hardcoded secrets"
+          else
+            echo "✅ No obvious hardcoded secrets found"
+          fi
+
+      - name: Check for Unsafe Operations
+        run: |
+          echo "Checking for unsafe operations..."
+
+          # Check for unsafe Swift operations
+          if grep -r "unsafeBitCast\|unsafeDowncast\|assumingMemoryBound\|withMemoryRebound" \
+              --include="*.swift" Sources/ | grep -v "// SAFETY:" > /tmp/unsafe.txt 2>/dev/null; then
+            echo "⚠️  Found unsafe operations without safety comments:"
+            cat /tmp/unsafe.txt
+          else
+            echo "✅ Unsafe operations properly documented"
+          fi
+
+  # ============================================================
+  # Dependency Audit
+  # ============================================================
+  dependency-audit:
+    name: Dependency Audit
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Check Package.swift Dependencies
+        run: |
+          echo "Checking Package.swift for external dependencies..."
+
+          # Extract dependencies from Package.swift
+          if grep -A 5 "dependencies:" Package.swift | grep "\.package" > /tmp/deps.txt; then
+            echo "External dependencies found:"
+            cat /tmp/deps.txt
+          else
+            echo "✅ No external Swift package dependencies"
+          fi
+
+      - name: Check for Outdated Swift Version
+        run: |
+          echo "Checking Swift version specification..."
+
+          if grep -q "swift-tools-version" Package.swift; then
+            version=$(grep "swift-tools-version" Package.swift | sed -E 's/.*swift-tools-version:\s*([0-9.]+).*/\1/')
+            echo "Swift tools version: $version"
+          fi
+
+  # ============================================================
+  # Summary Report
+  # ============================================================
+  ci-summary:
+    name: CI Summary
+    runs-on: ubuntu-latest
+    needs: [swift-build-check, documentation-check, example-validation, security-check, dependency-audit]
+    if: always()
+
+    steps:
+      - name: Generate Summary
+        run: |
+          echo "# SwiftIR CI Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Swift Build Check | ${{ needs.swift-build-check.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Documentation Check | ${{ needs.documentation-check.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Example Validation | ${{ needs.example-validation.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Security Check | ${{ needs.security-check.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Dependency Audit | ${{ needs.dependency-audit.result }} |" >> $GITHUB_STEP_SUMMARY

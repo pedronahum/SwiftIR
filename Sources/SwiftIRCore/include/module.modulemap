@@ -1,0 +1,4 @@
+module MLIRCoreWrapper {
+    header "MLIRCoreWrapper.h"
+    export *
+}

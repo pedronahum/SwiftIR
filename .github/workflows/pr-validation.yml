@@ -1,0 +1,283 @@
+name: PR Validation
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  # ============================================================
+  # PR Metadata Checks
+  # ============================================================
+  pr-checks:
+    name: PR Metadata Checks
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check PR Title Format
+        run: |
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          echo "PR Title: $PR_TITLE"
+
+          # Check if PR title follows conventional commit format
+          if echo "$PR_TITLE" | grep -qE '^(feat|fix|docs|style|refactor|perf|test|chore|ci|build)(\([a-z0-9-]+\))?!?: .+'; then
+            echo "✅ PR title follows conventional commit format"
+          else
+            echo "⚠️  PR title doesn't follow conventional commit format"
+            echo "Expected format: type(scope): description"
+            echo "Types: feat, fix, docs, style, refactor, perf, test, chore, ci, build"
+          fi
+
+      - name: Check PR Description
+        run: |
+          PR_BODY="${{ github.event.pull_request.body }}"
+
+          if [ -z "$PR_BODY" ] || [ "$PR_BODY" = "null" ]; then
+            echo "❌ PR description is empty"
+            echo "Please add a description explaining what this PR does"
+            exit 1
+          else
+            echo "✅ PR has a description"
+          fi
+
+      - name: Check PR Size
+        run: |
+          FILES_CHANGED=${{ github.event.pull_request.changed_files }}
+          ADDITIONS=${{ github.event.pull_request.additions }}
+          DELETIONS=${{ github.event.pull_request.deletions }}
+
+          echo "Files changed: $FILES_CHANGED"
+          echo "Lines added: $ADDITIONS"
+          echo "Lines deleted: $DELETIONS"
+
+          if [ $FILES_CHANGED -gt 50 ]; then
+            echo "⚠️  Large PR: $FILES_CHANGED files changed"
+            echo "Consider breaking this into smaller PRs"
+          fi
+
+          TOTAL_CHANGES=$((ADDITIONS + DELETIONS))
+          if [ $TOTAL_CHANGES -gt 1000 ]; then
+            echo "⚠️  Large PR: $TOTAL_CHANGES lines changed"
+            echo "Consider breaking this into smaller PRs"
+          fi
+
+      - name: Check for Breaking Changes
+        run: |
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          PR_BODY="${{ github.event.pull_request.body }}"
+
+          if echo "$PR_TITLE" | grep -q "!:"; then
+            echo "⚠️  Breaking change detected in PR title"
+            echo "Make sure CHANGELOG is updated and version is bumped appropriately"
+          fi
+
+          if echo "$PR_BODY" | grep -qi "breaking change"; then
+            echo "⚠️  Breaking change mentioned in PR description"
+            echo "Make sure CHANGELOG is updated and version is bumped appropriately"
+          fi
+
+  # ============================================================
+  # Code Changes Analysis
+  # ============================================================
+  code-analysis:
+    name: Code Changes Analysis
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get Changed Files
+        id: changed_files
+        run: |
+          # Get list of changed files
+          git fetch origin ${{ github.base_ref }}
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
+
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
+
+          # Categorize changes
+          SOURCE_CHANGES=$(echo "$CHANGED_FILES" | grep "^Sources/" || true)
+          EXAMPLE_CHANGES=$(echo "$CHANGED_FILES" | grep "^Examples/" || true)
+          TEST_CHANGES=$(echo "$CHANGED_FILES" | grep "^Tests/" || true)
+          DOC_CHANGES=$(echo "$CHANGED_FILES" | grep "\.md$" || true)
+          CONFIG_CHANGES=$(echo "$CHANGED_FILES" | grep -E "(Package\.swift|\.github/)" || true)
+
+          echo "has_source_changes=$([ -n "$SOURCE_CHANGES" ] && echo "true" || echo "false")" >> $GITHUB_OUTPUT
+          echo "has_example_changes=$([ -n "$EXAMPLE_CHANGES" ] && echo "true" || echo "false")" >> $GITHUB_OUTPUT
+          echo "has_test_changes=$([ -n "$TEST_CHANGES" ] && echo "true" || echo "false")" >> $GITHUB_OUTPUT
+          echo "has_doc_changes=$([ -n "$DOC_CHANGES" ] && echo "true" || echo "false")" >> $GITHUB_OUTPUT
+          echo "has_config_changes=$([ -n "$CONFIG_CHANGES" ] && echo "true" || echo "false")" >> $GITHUB_OUTPUT
+
+      - name: Check Tests for Source Changes
+        if: steps.changed_files.outputs.has_source_changes == 'true'
+        run: |
+          if [ "${{ steps.changed_files.outputs.has_test_changes }}" = "false" ]; then
+            echo "⚠️  Source code changed but no test changes detected"
+            echo "Consider adding tests for your changes"
+          else
+            echo "✅ Source changes include test updates"
+          fi
+
+      - name: Check Documentation for API Changes
+        if: steps.changed_files.outputs.has_source_changes == 'true'
+        run: |
+          # Check if public API changed
+          git fetch origin ${{ github.base_ref }}
+          API_CHANGES=$(git diff origin/${{ github.base_ref }}...HEAD -- Sources/ | grep -E "^\+.*public (func|struct|class|enum|protocol)" || true)
+
+          if [ -n "$API_CHANGES" ]; then
+            echo "⚠️  Public API changes detected"
+            echo "Make sure documentation is updated"
+
+            if [ "${{ steps.changed_files.outputs.has_doc_changes }}" = "false" ]; then
+              echo "⚠️  No documentation changes found"
+              echo "Consider updating READMEs for API changes"
+            fi
+          fi
+
+      - name: Check for New Examples
+        if: steps.changed_files.outputs.has_example_changes == 'true'
+        run: |
+          echo "✅ Example changes detected"
+          echo "Make sure new examples are:"
+          echo "  - Listed in README.md"
+          echo "  - Have documentation comments"
+          echo "  - Added to Package.swift if they're executable targets"
+
+      - name: Check Changelog Update
+        run: |
+          git fetch origin ${{ github.base_ref }}
+          CHANGELOG_UPDATED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -E "(CHANGELOG|ROADMAP)" || true)
+
+          if [ -n "$CHANGELOG_UPDATED" ]; then
+            echo "✅ Changelog/Roadmap updated"
+          else
+            if [ "${{ steps.changed_files.outputs.has_source_changes }}" = "true" ]; then
+              echo "⚠️  Source changes without changelog update"
+              echo "Consider updating ROADMAP.md or adding a CHANGELOG.md"
+            fi
+          fi
+
+  # ============================================================
+  # Label Suggestions
+  # ============================================================
+  suggest-labels:
+    name: Suggest PR Labels
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Analyze Changes and Suggest Labels
+        run: |
+          git fetch origin ${{ github.base_ref }}
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
+
+          echo "# Suggested Labels" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Documentation changes
+          if echo "$CHANGED_FILES" | grep -q "\.md$"; then
+            echo "- 📚 **documentation**" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Source code changes
+          if echo "$CHANGED_FILES" | grep -q "^Sources/"; then
+            echo "- 💻 **enhancement**" >> $GITHUB_STEP_SUMMARY
+
+            # Check specific modules
+            if echo "$CHANGED_FILES" | grep -q "Sources/SwiftIRCore"; then
+              echo "- 🏗️  **core**" >> $GITHUB_STEP_SUMMARY
+            fi
+            if echo "$CHANGED_FILES" | grep -q "Sources/SwiftIRXLA"; then
+              echo "- 🚀 **runtime**" >> $GITHUB_STEP_SUMMARY
+            fi
+            if echo "$CHANGED_FILES" | grep -q "Sources/SwiftIRMacros"; then
+              echo "- 🎯 **macros**" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+
+          # Example changes
+          if echo "$CHANGED_FILES" | grep -q "^Examples/"; then
+            echo "- 📝 **examples**" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Test changes
+          if echo "$CHANGED_FILES" | grep -q "^Tests/"; then
+            echo "- ✅ **tests**" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # CI/GitHub Actions changes
+          if echo "$CHANGED_FILES" | grep -q "\.github/workflows"; then
+            echo "- ⚙️  **ci**" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Build configuration
+          if echo "$CHANGED_FILES" | grep -q "Package\.swift"; then
+            echo "- 📦 **build**" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # GPU-related
+          if echo "$CHANGED_FILES" | grep -qE "(GPU|SPIRV|LLVM)"; then
+            echo "- 🎮 **gpu**" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "_Note: These are automated suggestions. Maintainers will apply appropriate labels._" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================
+  # PR Summary
+  # ============================================================
+  pr-summary:
+    name: PR Summary
+    runs-on: ubuntu-latest
+    needs: [pr-checks, code-analysis, suggest-labels]
+    if: always() && github.event.pull_request.draft == false
+
+    steps:
+      - name: Generate PR Summary
+        run: |
+          cat << 'EOF' >> $GITHUB_STEP_SUMMARY
+          # PR Validation Summary
+
+          ## Checks Completed
+          | Check | Status |
+          |-------|--------|
+          | PR Metadata | ${{ needs.pr-checks.result }} |
+          | Code Analysis | ${{ needs.code-analysis.result }} |
+          | Label Suggestions | ${{ needs.suggest-labels.result }} |
+
+          ## Reviewer Checklist
+          Before approving this PR, please verify:
+
+          - [ ] Code follows SwiftIR coding standards
+          - [ ] Public API changes are documented
+          - [ ] Tests are included for new functionality
+          - [ ] Examples are updated if relevant
+          - [ ] README/documentation is updated
+          - [ ] No sensitive information is exposed
+          - [ ] Breaking changes are clearly marked
+          - [ ] CHANGELOG/ROADMAP is updated if needed
+
+          ## Merge Guidelines
+          - Use "Squash and merge" for feature branches
+          - Use "Merge commit" for release branches
+          - Ensure commit message follows conventional commits format
+
+          ---
+          _Automated by SwiftIR PR Validation workflow_
+          EOF
