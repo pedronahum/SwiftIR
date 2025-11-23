@@ -21,15 +21,22 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install Swift Development Snapshot
+      - name: Install gnu-getopt
         run: |
-          # Install swiftly
-          curl -L https://swiftlang.github.io/swiftly/swiftly-install.sh | bash
-          export PATH="$HOME/.local/bin:$PATH"
+          brew install gnu-getopt
 
-          # Install Swift development snapshot
-          swiftly install ${{ env.SWIFT_VERSION }}
-          swiftly use ${{ env.SWIFT_VERSION }}
+      - name: Install Swift via Swiftly
+        run: |
+          export PATH="$(brew --prefix gnu-getopt)/bin:$PATH"
+          curl -O https://download.swift.org/swiftly/darwin/swiftly.pkg
+          installer -pkg swiftly.pkg -target CurrentUserHomeDirectory
+          ~/.swiftly/bin/swiftly init --quiet-shell-followup
+          . "${SWIFTLY_HOME_DIR:-$HOME/.swiftly}/env.sh"
+          hash -r
+          swiftly install ${{ env.SWIFT_VERSION }} --assume-yes --use
+
+          # Add to PATH for subsequent steps
+          echo "PATH=$HOME/.swiftly/bin:$PATH" >> $GITHUB_ENV
 
           # Verify installation
           swift --version
@@ -164,12 +171,24 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install Swift Development Snapshot
+      - name: Install gnu-getopt
         run: |
-          curl -L https://swiftlang.github.io/swiftly/swiftly-install.sh | bash
-          export PATH="$HOME/.local/bin:$PATH"
-          swiftly install ${{ env.SWIFT_VERSION }}
-          swiftly use ${{ env.SWIFT_VERSION }}
+          brew install gnu-getopt
+
+      - name: Install Swift via Swiftly
+        run: |
+          export PATH="$(brew --prefix gnu-getopt)/bin:$PATH"
+          curl -O https://download.swift.org/swiftly/darwin/swiftly.pkg
+          installer -pkg swiftly.pkg -target CurrentUserHomeDirectory
+          ~/.swiftly/bin/swiftly init --quiet-shell-followup
+          . "${SWIFTLY_HOME_DIR:-$HOME/.swiftly}/env.sh"
+          hash -r
+          swiftly install ${{ env.SWIFT_VERSION }} --assume-yes --use
+
+          # Add to PATH for subsequent steps
+          echo "PATH=$HOME/.swiftly/bin:$PATH" >> $GITHUB_ENV
+
+          # Verify installation
           swift --version
 
       - name: Count Examples
