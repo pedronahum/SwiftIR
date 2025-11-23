@@ -3,6 +3,7 @@ import SwiftSyntax
 import SwiftSyntaxBuilder
 import SwiftSyntaxMacros
 import SwiftDiagnostics
+import Foundation
 
 /// The @MLIRFunction macro transforms Swift functions into MLIR representations.
 ///

@@ -132,13 +132,13 @@ func runPJRTMatMulExample() throws {
             ],
             returnType: tensorC
         ) {
-            DotGeneral(
+            Return(DotGeneral(
                 "arg0", "arg1",
                 lhsType: tensorA,
                 rhsType: tensorB,
                 resultType: tensorC,
                 contractingDims: (1, 0)
-            )
+            ))
         }
     }
 

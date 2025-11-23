@@ -155,7 +155,7 @@ func mlirCreateConversionConvertLinalgToLoopsPass() -> MlirPass
 @_silgen_name("mlirCreateConversionConvertFuncToLLVMPass")
 func mlirCreateConversionConvertFuncToLLVMPass() -> MlirPass
 
-@_silgen_name("mlirCreateConversionSCFToControlFlowPass")
+@_silgen_name("mlirCreateConversionSCFToControlFlow")
 func mlirCreateConversionSCFToControlFlowPass() -> MlirPass
 
 @_silgen_name("mlirCreateConversionFinalizeMemRefToLLVMConversionPass")

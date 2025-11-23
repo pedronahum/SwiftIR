@@ -36,7 +36,7 @@ jobs:
       - name: Install Swift Development Snapshot
         run: |
           # Install swiftly
-          curl -L https://swift-server.github.io/swiftly/swiftly-install.sh | bash
+          curl -L https://swiftlang.github.io/swiftly/swiftly-install.sh | bash
           export PATH="$HOME/.local/bin:$PATH"
 
           # Install Swift development snapshot

@@ -63,13 +63,13 @@ do {
             // - bias addition (requires broadcast operation)
             // - ReLU activation (requires maximum operation)
             // - Layer 2 operations
-            DotGeneral(
+            Return(DotGeneral(
                 "input", "weight1",
                 lhsType: inputType,
                 rhsType: weight1Type,
                 resultType: hidden1Type,
                 contractingDims: (1, 0)
-            )
+            ))
         }
     }
 

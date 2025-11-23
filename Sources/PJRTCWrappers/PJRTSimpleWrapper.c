@@ -26,7 +26,13 @@ SW_PJRT_Error_Code PJRT_LoadPlugin(const char* plugin_path) {
         return SW_PJRT_Error_OK; // Already loaded
     }
 
+    // Use RTLD_DEEPBIND on Linux to isolate plugin's LLVM symbols from ours
+    // This prevents duplicate LLVM CommandLine registration errors
+    #ifdef __linux__
+    g_plugin_handle = dlopen(plugin_path, RTLD_NOW | RTLD_LOCAL | RTLD_DEEPBIND);
+    #else
     g_plugin_handle = dlopen(plugin_path, RTLD_NOW | RTLD_LOCAL);
+    #endif
     if (g_plugin_handle == NULL) {
         fprintf(stderr, "Failed to load PJRT plugin: %s\n", dlerror());
         return SW_PJRT_Error_INTERNAL;

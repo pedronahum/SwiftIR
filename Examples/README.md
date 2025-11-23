@@ -433,6 +433,47 @@ public struct Conv2D: StableHLOOperation {
 
 ---
 
+## ⚠️ Example Status
+
+Not all examples are fully functional. Some examples demonstrate future GPU/SPIR-V support and require additional MLIR passes that are not currently linked.
+
+### ✅ Working Examples (18/21)
+
+| Example | Description |
+|---------|-------------|
+| **PJRT_Add_Example** | Element-wise addition with XLA |
+| **PJRT_MatMul_Example** | Large-scale matrix multiplication (5000x+ speedup) |
+| **PJRT_MultiPath_Example** | Three approaches to the same computation |
+| **SimpleNN** | MLIR IR generation for neural networks |
+| **CNN** | Pooling/normalization operations |
+| **PJRT_SimpleString_Example** | Basic XLA execution |
+| **PJRT_PowerfulDSL_Example** | DSL matrix-vector multiplication |
+| **PJRT_NeuralNet_Example** | Neural network layer computation |
+| **PJRT_SequentialDSL_Example** | Sequential operations with let-binding |
+| **Macro_Example** | @MLIRFunction macro demonstration |
+| **PJRT_ThreeExecutables_Test** | Multiple executables coexistence |
+| **PJRT_TwoApproaches_Test** | Approaches 1 and 3 together |
+| **PJRT_Approaches1and2_Test** | Approaches 1 and 2 together |
+| **SPIRV_Example** | GPU architecture overview (shows structure) |
+| **XLA_Execution** | XLA backend overview |
+| **PJRT_Example** | PJRT integration overview |
+| **StableHLO_CNN** | CNN architecture building |
+| **StableHLO_ResNet** | ResNet residual blocks |
+
+### ⚠️ Examples with Expected Errors (3/21)
+
+These examples demonstrate future GPU lowering capabilities but require additional MLIR passes that aren't currently linked:
+
+| Example | Error | Reason |
+|---------|-------|--------|
+| **SPIRV_ManualCast_Test** | `Dialect 'memref' not found` | Requires memref dialect to be registered in the pipeline |
+| **LLVM_VectorAdd_Example** | `Pipeline parse failed: convert-linalg-to-parallel-loops` | LLVM lowering passes not linked |
+| **SPIRV_VectorAdd_Example** | `failed to legalize operation 'memref.load'` | Needs SPIR-V memref lowering passes |
+
+**Note:** These examples showcase the GPU/SPIR-V lowering architecture and will work once the corresponding MLIR passes are linked (see comments in each example for requirements).
+
+---
+
 ## 🛠️ Running the Examples
 
 ### Prerequisites
@@ -468,9 +509,32 @@ swift run PJRT_MultiPath_Example
 
 ### Environment Setup
 
-Ensure the PJRT plugin is accessible:
+**Before building or running examples**, set up the library paths:
+
 ```bash
-export DYLD_LIBRARY_PATH=/path/to/xla/bazel-bin/xla/pjrt/c:$DYLD_LIBRARY_PATH
+# Option 1: Source the environment file (recommended)
+source /etc/profile.d/swiftir.sh
+
+# Option 2: Set paths manually
+# LIBRARY_PATH - needed at link time (for swift build)
+export LIBRARY_PATH=/opt/swiftir-deps/lib:$LIBRARY_PATH
+
+# LD_LIBRARY_PATH - needed at runtime [Linux]
+export LD_LIBRARY_PATH=/opt/swiftir-deps/lib:$LD_LIBRARY_PATH
+
+# DYLD_LIBRARY_PATH - needed at runtime [macOS]
+export DYLD_LIBRARY_PATH=/opt/swiftir-deps/lib:$DYLD_LIBRARY_PATH
+```
+
+**Common errors without proper setup:**
+
+```bash
+# Link error (missing LIBRARY_PATH):
+error: link command failed with exit code 1
+/usr/bin/ld: cannot find -lPJRTProtoHelper
+
+# Runtime error (missing LD_LIBRARY_PATH):
+error while loading shared libraries: libPJRTProtoHelper.so: cannot open shared object file
 ```
 
 ---

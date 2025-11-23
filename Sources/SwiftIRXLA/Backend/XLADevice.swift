@@ -110,11 +110,24 @@ public class XLADeviceManager: @unchecked Sendable {
 
     /// Get system memory in bytes
     private func getSystemMemory() -> Int64 {
-        #if os(macOS) || os(Linux)
+        #if os(macOS)
         var size: UInt64 = 0
         var len = MemoryLayout<UInt64>.size
         sysctlbyname("hw.memsize", &size, &len, nil, 0)
         return Int64(size)
+        #elseif os(Linux)
+        // Read from /proc/meminfo on Linux
+        if let contents = try? String(contentsOfFile: "/proc/meminfo", encoding: .utf8) {
+            for line in contents.components(separatedBy: "\n") {
+                if line.hasPrefix("MemTotal:") {
+                    let parts = line.components(separatedBy: CharacterSet.whitespaces).filter { !$0.isEmpty }
+                    if parts.count >= 2, let kb = Int64(parts[1]) {
+                        return kb * 1024 // Convert KB to bytes
+                    }
+                }
+            }
+        }
+        return 8_000_000_000 // Default to 8GB
         #else
         return 8_000_000_000 // Default to 8GB
         #endif

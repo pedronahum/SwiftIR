@@ -28,12 +28,10 @@ import Foundation
 /// 5. All paths lead to XLA-optimized execution with identical results
 func runPJRTMultiPathExample() throws {
     print("Starting PJRT MultiPath Example...")
-    fflush(stdout)
     print(String(repeating: "=", count: 80))
     print("SwiftIR: Multiple Paths to the Same Computation")
     print("Comparing MLIR Ops, StableHLO DSL, and Manual StableHLO")
     print(String(repeating: "=", count: 80))
-    fflush(stdout)
 
     // MARK: - Configuration
 
@@ -266,13 +264,13 @@ func runPJRTMultiPathExample() throws {
             ],
             returnType: tensorC
         ) {
-            DotGeneral(
+            Return(DotGeneral(
                 "arg0", "arg1",
                 lhsType: tensorA,
                 rhsType: tensorB,
                 resultType: tensorC,
                 contractingDims: (1, 0)
-            )
+            ))
         }
     }
 

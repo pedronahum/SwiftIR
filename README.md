@@ -565,6 +565,38 @@ swift test
 swift run PJRT_Example
 ```
 
+### Important: Environment Setup for Building and Running
+
+**Before building or running examples**, you must set up library paths:
+
+```bash
+# Option 1: Source the environment file (recommended)
+source /etc/profile.d/swiftir.sh
+
+# Option 2: Set paths manually
+# LIBRARY_PATH - needed at link time (for swift build)
+export LIBRARY_PATH=/opt/swiftir-deps/lib:$LIBRARY_PATH
+
+# LD_LIBRARY_PATH - needed at runtime (for swift run) [Linux]
+export LD_LIBRARY_PATH=/opt/swiftir-deps/lib:$LD_LIBRARY_PATH
+
+# DYLD_LIBRARY_PATH - needed at runtime [macOS]
+export DYLD_LIBRARY_PATH=/opt/swiftir-deps/lib:$DYLD_LIBRARY_PATH
+```
+
+**Common errors without proper setup:**
+
+```bash
+# Link error (missing LIBRARY_PATH):
+error: link command failed with exit code 1
+/usr/bin/ld: cannot find -lPJRTProtoHelper
+
+# Runtime error (missing LD_LIBRARY_PATH):
+error while loading shared libraries: libPJRTProtoHelper.so: cannot open shared object file
+```
+
+For permanent setup, add `source /etc/profile.d/swiftir.sh` to your `~/.bashrc` or `~/.zshrc`.
+
 ### Build Configuration
 
 The project uses Swift Package Manager with custom build settings:

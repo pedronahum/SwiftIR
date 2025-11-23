@@ -37,12 +37,12 @@ public class XLAExecutable {
     ///   - arguments: Input arguments as raw pointers
     /// - Throws: Execution errors
     public func execute(function functionName: String, arguments: inout [UnsafeMutableRawPointer?]) throws {
-        let startTime = CFAbsoluteTimeGetCurrent()
+        let startTime = Date()
 
         try engine.invokePacked(name: functionName, arguments: &arguments)
 
-        let endTime = CFAbsoluteTimeGetCurrent()
-        let executionTimeMs = (endTime - startTime) * 1000.0
+        let endTime = Date()
+        let executionTimeMs = endTime.timeIntervalSince(startTime) * 1000.0
 
         executionCount += 1
         totalExecutionTimeMs += executionTimeMs

@@ -63,13 +63,13 @@ do {
         ) {
             // Matrix-vector multiplication: (2x4) × (4x1) -> (2x1)
             // This generates the correct StableHLO dot_general operation
-            DotGeneral(
+            Return(DotGeneral(
                 "matrix", "vector",
                 lhsType: matrixType,
                 rhsType: vectorType,
                 resultType: resultType,
                 contractingDims: (1, 0)  // Contract over dimension 1 of matrix, 0 of vector
-            )
+            ))
         }
     }
 

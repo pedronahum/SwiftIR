@@ -24,11 +24,18 @@ public class PJRTClient {
         func pluginPath() -> String {
             switch self {
             case .cpu:
-                // Try several common locations
-                let paths = [
-                    "/Users/pedro/programming/swift/SwiftIR/lib/pjrt_c_api_cpu_plugin.dylib",
-                    "./lib/pjrt_c_api_cpu_plugin.dylib",
-                    "../lib/pjrt_c_api_cpu_plugin.dylib",
+                // Try several common locations for both macOS and Linux
+                #if os(macOS)
+                let ext = "dylib"
+                let systemPaths = ["/Users/pedro/programming/swift/SwiftIR/lib"]
+                #else
+                let ext = "so"
+                let systemPaths = ["/opt/swiftir-deps/lib", "/usr/local/lib"]
+                #endif
+
+                let paths = systemPaths.map { "\($0)/pjrt_c_api_cpu_plugin.\(ext)" } + [
+                    "./lib/pjrt_c_api_cpu_plugin.\(ext)",
+                    "../lib/pjrt_c_api_cpu_plugin.\(ext)",
                 ]
                 for path in paths {
                     if FileManager.default.fileExists(atPath: path) {
@@ -37,9 +44,17 @@ public class PJRTClient {
                 }
                 return paths[0] // Return first as default
             case .gpu:
+                #if os(macOS)
                 return "/Users/pedro/programming/swift/SwiftIR/lib/pjrt_c_api_gpu_plugin.dylib"
+                #else
+                return "/opt/swiftir-deps/lib/pjrt_c_api_gpu_plugin.so"
+                #endif
             case .tpu:
+                #if os(macOS)
                 return "/Users/pedro/programming/swift/SwiftIR/lib/pjrt_c_api_tpu_plugin.dylib"
+                #else
+                return "/opt/swiftir-deps/lib/pjrt_c_api_tpu_plugin.so"
+                #endif
             }
         }
     }

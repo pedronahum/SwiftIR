@@ -8,7 +8,8 @@
 #include "mlir-c/Dialect/Linalg.h"
 #include <stablehlo/integrations/c/StablehloDialect.h>
 #include <stablehlo/integrations/c/ChloDialect.h>
-#include <stablehlo/integrations/c/StablehloPasses.h>
+// Note: StableHLO v1.0.0 doesn't have the passes C API header
+// We provide stub implementations below
 
 // This is a minimal wrapper that ensures all MLIR/LLVM symbols are included
 // in the shared library. The actual functionality is provided by the C API
@@ -42,8 +43,11 @@ void swiftir_register_chlo_dialect(MlirContext context) {
 }
 
 // StableHLO pass registration wrapper
+// Note: StableHLO v1.0.0 doesn't expose pass registration via C API
+// This is a stub that does nothing - passes must be registered differently
 void swiftir_register_all_stablehlo_passes() {
-    mlirRegisterAllStablehloPasses();
+    // No-op for StableHLO v1.0.0
+    // Passes are available but not through C API
 }
 
 } // extern "C"

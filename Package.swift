@@ -170,7 +170,7 @@ let package = Package(
             name: "SwiftIRCore",
             dependencies: ["MLIRCoreWrappers", "PJRTCWrappers"],
             path: "Sources/SwiftIRCore",
-            exclude: ["MLIRCoreWrappers.c"],
+            exclude: ["MLIRCoreWrappers.c", "README.md"],
             swiftSettings: [
                 .interoperabilityMode(.Cxx),
                 .unsafeFlags(allSwiftIncludePaths),
@@ -186,6 +186,7 @@ let package = Package(
             name: "SwiftIRTypes",
             dependencies: ["SwiftIRCore"],
             path: "Sources/SwiftIRTypes",
+            exclude: ["README.md"],
             swiftSettings: [
                 .interoperabilityMode(.Cxx),
                 .unsafeFlags(allSwiftIncludePaths),
@@ -198,6 +199,7 @@ let package = Package(
             name: "SwiftIRDialects",
             dependencies: ["SwiftIRCore", "SwiftIRTypes"],
             path: "Sources/SwiftIRDialects",
+            exclude: ["README.md"],
             swiftSettings: [
                 .interoperabilityMode(.Cxx),
                 .unsafeFlags(allSwiftIncludePaths),
@@ -210,6 +212,7 @@ let package = Package(
             name: "SwiftIRBuilders",
             dependencies: ["SwiftIRCore", "SwiftIRTypes", "SwiftIRDialects"],
             path: "Sources/SwiftIRBuilders",
+            exclude: ["README.md"],
             swiftSettings: [
                 .interoperabilityMode(.Cxx),
                 .unsafeFlags(allSwiftIncludePaths),
@@ -239,6 +242,7 @@ let package = Package(
                 "SwiftIRMacros"
             ],
             path: "Sources/SwiftIR",
+            exclude: ["README.md"],
             swiftSettings: [
                 .interoperabilityMode(.Cxx),
                 .unsafeFlags(allSwiftIncludePaths),
@@ -252,6 +256,7 @@ let package = Package(
             name: "SwiftIRXLA",
             dependencies: ["SwiftIRCore", "SwiftIRTypes", "SwiftIRDialects", "SwiftIRStableHLO", "PJRTCWrappers"],
             path: "Sources/SwiftIRXLA",
+            exclude: ["README.md"],
             swiftSettings: [
                 .interoperabilityMode(.Cxx),
                 .unsafeFlags(allSwiftIncludePaths),
@@ -270,6 +275,7 @@ let package = Package(
             name: "SwiftIRStableHLO",
             dependencies: ["SwiftIRCore", "SwiftIRTypes", "SwiftIRDialects"],
             path: "Sources/SwiftIRStableHLO",
+            exclude: ["README.md"],
             swiftSettings: [
                 .interoperabilityMode(.Cxx),
                 .unsafeFlags(allSwiftIncludePathsWithStableHLO),
@@ -312,6 +318,7 @@ let package = Package(
                 "SwiftIRDialects"
             ],
             path: "Examples",
+            exclude: ["README.md"],
             sources: ["SimpleNN.swift"],
             swiftSettings: [
                 .interoperabilityMode(.Cxx),
@@ -329,6 +336,7 @@ let package = Package(
                 "SwiftIRDialects"
             ],
             path: "Examples",
+            exclude: ["README.md"],
             sources: ["CNN.swift"],
             swiftSettings: [
                 .interoperabilityMode(.Cxx),
@@ -345,6 +353,7 @@ let package = Package(
                 "SwiftIRStableHLO"
             ],
             path: "Examples",
+            exclude: ["README.md"],
             sources: ["XLA_Execution.swift"],
             swiftSettings: [
                 .interoperabilityMode(.Cxx),
@@ -361,6 +370,7 @@ let package = Package(
                 "SwiftIRStableHLO"
             ],
             path: "Examples",
+            exclude: ["README.md"],
             sources: ["StableHLO_CNN.swift"],
             swiftSettings: [
                 .interoperabilityMode(.Cxx),
@@ -377,6 +387,7 @@ let package = Package(
                 "SwiftIRStableHLO"
             ],
             path: "Examples",
+            exclude: ["README.md"],
             sources: ["StableHLO_ResNet.swift"],
             swiftSettings: [
                 .interoperabilityMode(.Cxx),
@@ -393,6 +404,7 @@ let package = Package(
                 "SwiftIRStableHLO"
             ],
             path: "Examples",
+            exclude: ["README.md"],
             sources: ["PJRT_Example.swift"],
             swiftSettings: [
                 .interoperabilityMode(.Cxx),
@@ -411,6 +423,7 @@ let package = Package(
                 "SwiftIRStableHLO"
             ],
             path: "Examples",
+            exclude: ["README.md"],
             sources: ["PJRT_Add_Example.swift"],
             swiftSettings: [
                 .interoperabilityMode(.Cxx),
@@ -424,6 +437,7 @@ let package = Package(
                 "SwiftIRXLA",
             ],
             path: "Examples",
+            exclude: ["README.md"],
             sources: ["PJRT_SimpleString_Example.swift"],
             swiftSettings: [
                 .interoperabilityMode(.Cxx),
@@ -440,6 +454,7 @@ let package = Package(
                 "SwiftIRStableHLO",
             ],
             path: "Examples",
+            exclude: ["README.md"],
             sources: ["PJRT_PowerfulDSL_Example.swift"],
             swiftSettings: [
                 .interoperabilityMode(.Cxx),
@@ -456,6 +471,7 @@ let package = Package(
                 "SwiftIRStableHLO",
             ],
             path: "Examples",
+            exclude: ["README.md"],
             sources: ["PJRT_NeuralNet_Example.swift"],
             swiftSettings: [
                 .interoperabilityMode(.Cxx),
@@ -472,6 +488,7 @@ let package = Package(
                 "SwiftIRStableHLO",
             ],
             path: "Examples",
+            exclude: ["README.md"],
             sources: ["PJRT_SequentialDSL_Example.swift"],
             swiftSettings: [
                 .interoperabilityMode(.Cxx),
@@ -490,6 +507,7 @@ let package = Package(
                 "SwiftIRStableHLO"
             ],
             path: "Examples",
+            exclude: ["README.md"],
             sources: ["PJRT_MatMul_Example.swift"],
             swiftSettings: [
                 .interoperabilityMode(.Cxx),
@@ -506,6 +524,7 @@ let package = Package(
                 "SwiftIRTypes",
             ],
             path: "Examples",
+            exclude: ["README.md"],
             sources: ["Macro_Example.swift"],
             swiftSettings: [
                 .interoperabilityMode(.Cxx),
@@ -524,6 +543,7 @@ let package = Package(
                 "SwiftIRStableHLO"
             ],
             path: "Examples",
+            exclude: ["README.md"],
             sources: ["PJRT_MultiPath_Example.swift"],
             swiftSettings: [
                 .interoperabilityMode(.Cxx),
@@ -537,6 +557,7 @@ let package = Package(
                 "SwiftIRXLA",
             ],
             path: "Examples",
+            exclude: ["README.md"],
             sources: ["PJRT_ThreeExecutables_Test.swift"],
             swiftSettings: [
                 .interoperabilityMode(.Cxx),
@@ -550,6 +571,7 @@ let package = Package(
                 "SwiftIRXLA",
             ],
             path: "Examples",
+            exclude: ["README.md"],
             sources: ["PJRT_TwoApproaches_Test.swift"],
             swiftSettings: [
                 .interoperabilityMode(.Cxx),
@@ -566,6 +588,7 @@ let package = Package(
                 "SwiftIRStableHLO",
             ],
             path: "Examples",
+            exclude: ["README.md"],
             sources: ["PJRT_Approaches1and2_Test.swift"],
             swiftSettings: [
                 .interoperabilityMode(.Cxx),
@@ -583,6 +606,7 @@ let package = Package(
                 "SwiftIRStableHLO",
             ],
             path: "Examples",
+            exclude: ["README.md"],
             sources: ["SPIRV_Example.swift"],
             swiftSettings: [
                 .interoperabilityMode(.Cxx),
@@ -599,6 +623,7 @@ let package = Package(
                 "SwiftIRTypes",
             ],
             path: "Examples",
+            exclude: ["README.md"],
             sources: ["SPIRV_ManualCast_Test.swift"],
             swiftSettings: [
                 .interoperabilityMode(.Cxx),
@@ -615,6 +640,7 @@ let package = Package(
                 "SwiftIRTypes",
             ],
             path: "Examples",
+            exclude: ["README.md"],
             sources: ["LLVM_VectorAdd_Example.swift"],
             swiftSettings: [
                 .interoperabilityMode(.Cxx),
@@ -631,6 +657,7 @@ let package = Package(
                 "SwiftIRTypes",
             ],
             path: "Examples",
+            exclude: ["README.md"],
             sources: ["SPIRV_VectorAdd_Example.swift"],
             swiftSettings: [
                 .interoperabilityMode(.Cxx),
