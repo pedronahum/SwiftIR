@@ -444,3 +444,121 @@ extension Stablehlo {
             .build()
     }
 }
+
+// MARK: - Control Flow Operations
+
+extension Stablehlo {
+
+    /// Creates a StableHLO while operation
+    ///
+    /// Executes a while loop with a condition region and body region.
+    /// This is the key operation for efficient iterative algorithms with XLA fusion.
+    ///
+    /// The `stablehlo.while` operation has two regions:
+    /// 1. **Condition region**: Takes loop state, returns i1 (continue or not)
+    /// 2. **Body region**: Takes loop state, returns updated loop state
+    ///
+    /// Example MLIR:
+    /// ```mlir
+    /// %result = stablehlo.while(%arg0 = %init) : tensor<f32> {
+    ///   // Condition region
+    ///   ^bb0(%cond_arg: tensor<f32>):
+    ///     %cond = stablehlo.compare LT, %cond_arg, %max : tensor<i1>
+    ///     stablehlo.return %cond : tensor<i1>
+    /// } do {
+    ///   // Body region
+    ///   ^bb0(%body_arg: tensor<f32>):
+    ///     %new_val = stablehlo.add %body_arg, %step : tensor<f32>
+    ///     stablehlo.return %new_val : tensor<f32>
+    /// }
+    /// ```
+    ///
+    /// - Parameters:
+    ///   - initialValues: Initial loop carry values
+    ///   - conditionRegion: Region that computes loop condition (returns i1)
+    ///   - bodyRegion: Region that computes next iteration state
+    ///   - location: Source location for debugging
+    ///   - context: The MLIR context
+    /// - Returns: The while operation
+    public static func whileOp(
+        initialValues: [MLIRValue],
+        conditionRegion: MLIRRegion,
+        bodyRegion: MLIRRegion,
+        location: MLIRLocation,
+        context: MLIRContext
+    ) -> MLIROperation {
+        let resultTypes = initialValues.map { $0.getType() }
+
+        return OperationBuilder(name: "stablehlo.while", location: location, context: context)
+            .addOperands(initialValues)
+            .addResults(resultTypes)
+            .addRegions([conditionRegion, bodyRegion])
+            .build()
+    }
+
+    /// Creates a StableHLO return operation (for regions)
+    ///
+    /// Returns values from a region (used in while loop condition/body).
+    ///
+    /// - Parameters:
+    ///   - operands: Values to return
+    ///   - location: Source location for debugging
+    ///   - context: The MLIR context
+    /// - Returns: The return operation
+    public static func `return`(
+        _ operands: [MLIRValue],
+        location: MLIRLocation,
+        context: MLIRContext
+    ) -> MLIROperation {
+        return OperationBuilder(name: "stablehlo.return", location: location, context: context)
+            .addOperands(operands)
+            .build()
+    }
+
+    /// Comparison directions for stablehlo.compare
+    public enum ComparisonDirection: String {
+        case eq = "EQ"   // Equal
+        case ne = "NE"   // Not equal
+        case lt = "LT"   // Less than
+        case le = "LE"   // Less than or equal
+        case gt = "GT"   // Greater than
+        case ge = "GE"   // Greater than or equal
+    }
+
+    /// Creates a StableHLO compare operation
+    ///
+    /// Performs element-wise comparison of two tensors.
+    ///
+    /// - Parameters:
+    ///   - lhs: Left-hand side operand
+    ///   - rhs: Right-hand side operand
+    ///   - direction: Comparison direction (EQ, NE, LT, LE, GT, GE)
+    ///   - location: Source location for debugging
+    ///   - context: The MLIR context
+    /// - Returns: The operation (returns tensor of i1)
+    public static func compare(
+        _ lhs: MLIRValue,
+        _ rhs: MLIRValue,
+        direction: ComparisonDirection,
+        location: MLIRLocation,
+        context: MLIRContext
+    ) -> MLIROperation {
+        // Result type is i1 (boolean) tensor with same shape as inputs
+        // For now, we'll create a simple scalar i1 tensor type
+        // In full implementation, would extract shape from lhsType and create proper result type
+        let i1Type = IntegerType.i1(context: context)
+        let resultType = RankedTensorType(shape: [], elementType: i1Type, context: context)
+
+        // Create comparison_direction attribute
+        let directionAttr = direction.rawValue.withCString { ptr in
+            let strRef = mlirStringRefCreateWrapper(ptr, direction.rawValue.utf8.count)
+            return mlirStringAttrGetWrapper(context.handle, strRef)
+        }
+
+        return OperationBuilder(name: "stablehlo.compare", location: location, context: context)
+            .addOperands([lhs, rhs])
+            .addResults([resultType.typeHandle])
+            .addAttributes([("comparison_direction", directionAttr)])
+            .build()
+    }
+}

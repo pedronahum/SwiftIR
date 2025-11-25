@@ -131,6 +131,18 @@ let package = Package(
             name: "Macro_Example",
             targets: ["Macro_Example"]
         ),
+        .executable(
+            name: "BuildingSimulation_Simple",
+            targets: ["BuildingSimulation_Simple"]
+        ),
+        .executable(
+            name: "BuildingSimulation_SwiftIR",
+            targets: ["BuildingSimulation_SwiftIR"]
+        ),
+        .executable(
+            name: "BuildingSimulation_StandardSwift",
+            targets: ["BuildingSimulation_StandardSwift"]
+        ),
     ],
     dependencies: [
         .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "600.0.0"),
@@ -530,6 +542,48 @@ let package = Package(
                 .interoperabilityMode(.Cxx),
                 .unsafeFlags(allSwiftIncludePaths),
             ]
+        ),
+
+        .executableTarget(
+            name: "BuildingSimulation_Simple",
+            dependencies: [
+                "SwiftIR",
+                "SwiftIRXLA",
+                "SwiftIRCore",
+                "SwiftIRTypes",
+            ],
+            path: "Examples",
+            exclude: ["README.md"],
+            sources: ["BuildingSimulation_Simple.swift"],
+            swiftSettings: [
+                .interoperabilityMode(.Cxx),
+                .unsafeFlags(allSwiftIncludePaths),
+            ]
+        ),
+
+        .executableTarget(
+            name: "BuildingSimulation_SwiftIR",
+            dependencies: [
+                "SwiftIR",
+                "SwiftIRXLA",
+                "SwiftIRCore",
+                "SwiftIRTypes",
+            ],
+            path: "Examples",
+            exclude: ["README.md"],
+            sources: ["BuildingSimulation_SwiftIR.swift"],
+            swiftSettings: [
+                .interoperabilityMode(.Cxx),
+                .unsafeFlags(allSwiftIncludePaths),
+            ]
+        ),
+
+        .executableTarget(
+            name: "BuildingSimulation_StandardSwift",
+            dependencies: [],  // No SwiftIR dependencies - pure Swift only
+            path: "Examples",
+            exclude: ["README.md"],
+            sources: ["BuildingSimulation_StandardSwift.swift"]
         ),
 
         .executableTarget(
