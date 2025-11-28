@@ -110,6 +110,11 @@ let package = Package(
             name: "SwiftIRStableHLO",
             targets: ["SwiftIRStableHLO"]
         ),
+        // Runtime detection and unified client API
+        .library(
+            name: "SwiftIRRuntime",
+            targets: ["SwiftIRRuntime"]
+        ),
         // Examples
         .executable(
             name: "SimpleNN",
@@ -295,6 +300,15 @@ let package = Package(
             linkerSettings: [
                 .unsafeFlags(mlirLinkerFlags),
             ]
+        ),
+
+        // MARK: - Runtime Detection & Unified API
+
+        // Automatic CPU/GPU/TPU detection and unified client creation
+        .target(
+            name: "SwiftIRRuntime",
+            dependencies: [],
+            path: "Sources/SwiftIRRuntime"
         ),
 
         // SPIR-V for Graphics/Compute
@@ -587,6 +601,14 @@ let package = Package(
         ),
 
         .executableTarget(
+            name: "RuntimeInfo",
+            dependencies: ["SwiftIRRuntime"],
+            path: "Examples",
+            exclude: ["README.md"],
+            sources: ["RuntimeInfo.swift"]
+        ),
+
+        .executableTarget(
             name: "PJRT_MultiPath_Example",
             dependencies: [
                 "SwiftIRXLA",
@@ -742,6 +764,12 @@ let package = Package(
                 .unsafeFlags(mlirLinkerFlags + [
                 ]),
             ]
+        ),
+
+        .testTarget(
+            name: "SwiftIRRuntimeTests",
+            dependencies: ["SwiftIRRuntime"],
+            path: "Tests/SwiftIRRuntimeTests"
         ),
     ]
 )

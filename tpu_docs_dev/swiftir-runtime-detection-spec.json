@@ -1,0 +1,759 @@
+{
+  "project": {
+    "name": "SwiftIR Runtime Detection & Unified PJRT API",
+    "version": "1.0.0",
+    "description": "Implementation specification for automatic CPU/GPU/TPU detection and unified PJRT client creation in SwiftIR, enabling seamless execution on Google Colab and Cloud TPU VMs",
+    "repository": "https://github.com/pedronahum/SwiftIR",
+    "related_repositories": [
+      "https://github.com/pedronahum/swift-jupyter"
+    ]
+  },
+
+  "overview": {
+    "goals": [
+      "Enable automatic detection of available accelerators (CPU, GPU, TPU)",
+      "Provide unified PJRTClient.create() API similar to JAX's device detection",
+      "Support Google Colab environments (CPU, GPU, TPU v2 runtimes)",
+      "Support Cloud TPU VMs",
+      "Create prebuilt binary distribution for easy installation",
+      "Eliminate need for users to compile from source (currently takes ~1 day)"
+    ],
+    "target_environments": [
+      {
+        "name": "Google Colab CPU",
+        "detection": "Default when no accelerator detected",
+        "plugin": "pjrt_c_api_cpu_plugin.so (bundled)"
+      },
+      {
+        "name": "Google Colab GPU",
+        "detection": "/dev/nvidia0 exists, nvidia-smi works, CUDA libs present",
+        "plugin": "xla_cuda_plugin.so (from JAX or XLA build)"
+      },
+      {
+        "name": "Google Colab TPU v2",
+        "detection": "/dev/accel* devices exist, /lib/libtpu.so present",
+        "plugin": "libtpu.so (pre-installed on TPU runtime)"
+      },
+      {
+        "name": "Cloud TPU VM",
+        "detection": "/dev/accel* devices, TPU_NAME env var, libtpu.so",
+        "plugin": "libtpu.so (pre-installed on VM)"
+      }
+    ]
+  },
+
+  "architecture": {
+    "modules_to_create": [
+      {
+        "name": "SwiftIRRuntime",
+        "path": "Sources/SwiftIRRuntime/",
+        "description": "Runtime detection and unified client creation",
+        "files": [
+          "AcceleratorType.swift",
+          "RuntimeDetector.swift",
+          "PJRTPlugin.swift",
+          "PJRTClient+Unified.swift",
+          "Errors.swift"
+        ]
+      }
+    ],
+    "modules_to_modify": [
+      {
+        "name": "PJRTCWrappers",
+        "path": "Sources/PJRTCWrappers/",
+        "changes": [
+          "Add createTPU() method",
+          "Add createGPU() method",
+          "Add generic plugin loading infrastructure",
+          "Ensure createCPU() follows same pattern"
+        ]
+      },
+      {
+        "name": "SwiftIR (main)",
+        "path": "Sources/SwiftIR/",
+        "changes": [
+          "Re-export SwiftIRRuntime module",
+          "Add convenience initializers"
+        ]
+      }
+    ]
+  },
+
+  "specifications": {
+    "AcceleratorType": {
+      "file": "Sources/SwiftIRRuntime/AcceleratorType.swift",
+      "type": "enum",
+      "definition": {
+        "cases": ["cpu", "gpu", "tpu"],
+        "protocols": ["String", "RawRepresentable", "CustomStringConvertible", "Equatable", "Hashable", "Codable"],
+        "properties": {
+          "description": "Human-readable name (CPU, GPU, TPU)",
+          "pluginName": "Expected plugin filename for each type"
+        }
+      },
+      "code_template": "public enum AcceleratorType: String, CustomStringConvertible, Equatable, Hashable, Codable {\n    case cpu = \"CPU\"\n    case gpu = \"GPU\"\n    case tpu = \"TPU\"\n    \n    public var description: String { rawValue }\n    \n    public var pluginName: String {\n        switch self {\n        case .cpu: return \"pjrt_c_api_cpu_plugin.so\"\n        case .gpu: return \"xla_cuda_plugin.so\"\n        case .tpu: return \"libtpu.so\"\n        }\n    }\n}"
+    },
+
+    "RuntimeDetector": {
+      "file": "Sources/SwiftIRRuntime/RuntimeDetector.swift",
+      "type": "struct",
+      "description": "Static methods to detect available accelerators",
+      "methods": [
+        {
+          "name": "detect",
+          "signature": "public static func detect() -> AcceleratorType",
+          "description": "Detect best available accelerator with priority: env override > TPU > GPU > CPU",
+          "implementation_steps": [
+            "1. Check PJRT_DEVICE environment variable for explicit override",
+            "2. Call isTPUAvailable() - if true, return .tpu",
+            "3. Call isGPUAvailable() - if true, return .gpu",
+            "4. Return .cpu as fallback"
+          ]
+        },
+        {
+          "name": "isTPUAvailable",
+          "signature": "public static func isTPUAvailable() -> Bool",
+          "description": "Check if TPU hardware is available",
+          "detection_methods": [
+            {
+              "method": "Check /dev/accel* devices",
+              "paths": ["/dev/accel0", "/dev/accel1", "/dev/accel2", "/dev/accel3"],
+              "description": "TPU chips appear as /dev/accel* on TPU VMs"
+            },
+            {
+              "method": "Check libtpu.so existence",
+              "paths": [
+                "/lib/libtpu.so",
+                "/usr/local/lib/libtpu.so",
+                "$TPU_LIBRARY_PATH",
+                "~/.local/lib/python3.10/site-packages/libtpu/libtpu.so",
+                "~/.local/lib/python3.11/site-packages/libtpu/libtpu.so"
+              ],
+              "description": "libtpu.so is the TPU PJRT plugin"
+            },
+            {
+              "method": "Check TPU_NAME environment variable",
+              "description": "Set on Cloud TPU VMs"
+            }
+          ]
+        },
+        {
+          "name": "isGPUAvailable",
+          "signature": "public static func isGPUAvailable() -> Bool",
+          "description": "Check if NVIDIA GPU is available",
+          "detection_methods": [
+            {
+              "method": "Check /dev/nvidia* devices",
+              "paths": ["/dev/nvidia0", "/dev/nvidiactl", "/dev/nvidia-uvm"],
+              "description": "NVIDIA devices on Linux"
+            },
+            {
+              "method": "Check CUDA libraries",
+              "paths": [
+                "/usr/local/cuda/lib64/libcudart.so",
+                "/usr/lib/x86_64-linux-gnu/libcuda.so",
+                "/usr/lib/x86_64-linux-gnu/libcuda.so.1"
+              ],
+              "description": "CUDA runtime libraries"
+            },
+            {
+              "method": "Check CUDA_VISIBLE_DEVICES environment",
+              "description": "If set and not empty or '-1', GPU is likely available"
+            },
+            {
+              "method": "Run nvidia-smi",
+              "command": "/usr/bin/nvidia-smi -L",
+              "description": "Fallback: execute nvidia-smi and check exit code"
+            }
+          ]
+        },
+        {
+          "name": "getRuntimeInfo",
+          "signature": "public static func getRuntimeInfo() -> RuntimeInfo",
+          "description": "Get detailed runtime information for debugging",
+          "returns": {
+            "type": "RuntimeInfo struct",
+            "fields": [
+              "detectedAccelerator: AcceleratorType",
+              "tpuAvailable: Bool",
+              "gpuAvailable: Bool",
+              "tpuCoreCount: Int?",
+              "gpuDeviceCount: Int?",
+              "environmentVariables: [String: String]",
+              "detectedPluginPaths: [AcceleratorType: String]"
+            ]
+          }
+        },
+        {
+          "name": "findPluginPath",
+          "signature": "public static func findPluginPath(for accelerator: AcceleratorType) -> String?",
+          "description": "Find the path to the PJRT plugin for given accelerator",
+          "search_paths": {
+            "tpu": [
+              "$TPU_LIBRARY_PATH",
+              "/lib/libtpu.so",
+              "/usr/local/lib/libtpu.so",
+              "~/.local/lib/python3.10/site-packages/libtpu/libtpu.so",
+              "~/.local/lib/python3.11/site-packages/libtpu/libtpu.so"
+            ],
+            "gpu": [
+              "$PJRT_GPU_PLUGIN_PATH",
+              "/usr/local/lib/pjrt_c_api_gpu_plugin.so",
+              "~/.local/lib/python3.10/site-packages/jax_plugins/xla_cuda12/xla_cuda_plugin.so",
+              "~/.local/lib/python3.11/site-packages/jax_plugins/xla_cuda12/xla_cuda_plugin.so",
+              "$SWIFTIR_HOME/lib/pjrt_c_api_gpu_plugin.so"
+            ],
+            "cpu": [
+              "$PJRT_CPU_PLUGIN_PATH",
+              "/usr/local/lib/pjrt_c_api_cpu_plugin.so",
+              "$SWIFTIR_HOME/lib/pjrt_c_api_cpu_plugin.so",
+              "./lib/pjrt_c_api_cpu_plugin.so"
+            ]
+          }
+        }
+      ]
+    },
+
+    "PJRTPlugin": {
+      "file": "Sources/SwiftIRRuntime/PJRTPlugin.swift",
+      "type": "class",
+      "description": "Wrapper for dynamically loaded PJRT plugins",
+      "properties": [
+        {
+          "name": "handle",
+          "type": "UnsafeMutableRawPointer",
+          "description": "dlopen handle to the loaded shared library"
+        },
+        {
+          "name": "api",
+          "type": "UnsafePointer<PJRT_Api>",
+          "description": "Pointer to PJRT_Api struct returned by GetPjrtApi()"
+        },
+        {
+          "name": "path",
+          "type": "String",
+          "description": "Path to the loaded plugin"
+        },
+        {
+          "name": "acceleratorType",
+          "type": "AcceleratorType",
+          "description": "Type of accelerator this plugin supports"
+        }
+      ],
+      "methods": [
+        {
+          "name": "init",
+          "signature": "public init(path: String, acceleratorType: AcceleratorType) throws",
+          "description": "Load plugin from path using dlopen and get PJRT_Api",
+          "implementation_steps": [
+            "1. Call dlopen(path, RTLD_NOW | RTLD_LOCAL)",
+            "2. Handle dlopen failure with descriptive error",
+            "3. Call dlsym(handle, \"GetPjrtApi\") to get function pointer",
+            "4. Cast to GetPjrtApi function type: @convention(c) () -> UnsafePointer<PJRT_Api>?",
+            "5. Call GetPjrtApi() to get PJRT_Api pointer",
+            "6. Validate api pointer is not nil",
+            "7. Store handle, api, path, acceleratorType"
+          ],
+          "error_cases": [
+            "PluginLoadError.dlopenFailed(path: String, error: String)",
+            "PluginLoadError.symbolNotFound(symbol: String, path: String)",
+            "PluginLoadError.apiInitFailed(path: String)"
+          ]
+        },
+        {
+          "name": "deinit",
+          "description": "Call dlclose(handle) to unload plugin"
+        },
+        {
+          "name": "load",
+          "signature": "public static func load(for accelerator: AcceleratorType) throws -> PJRTPlugin",
+          "description": "Convenience method to find and load plugin for accelerator type"
+        }
+      ]
+    },
+
+    "PJRTClient_Unified": {
+      "file": "Sources/PJRTCWrappers/PJRTClient+Unified.swift",
+      "type": "extension PJRTClient",
+      "description": "Unified client creation API",
+      "methods": [
+        {
+          "name": "create",
+          "signature": "public static func create(_ accelerator: AcceleratorType? = nil) throws -> PJRTClient",
+          "description": "Create PJRT client with auto-detection or explicit accelerator",
+          "implementation": [
+            "1. If accelerator is nil, call RuntimeDetector.detect()",
+            "2. Print 'SwiftIR: Using {accelerator} backend'",
+            "3. Switch on accelerator type and call appropriate create method",
+            "4. Return created client"
+          ]
+        },
+        {
+          "name": "createTPU",
+          "signature": "public static func createTPU() throws -> PJRTClient",
+          "description": "Create TPU client by loading libtpu.so",
+          "implementation": [
+            "1. Find libtpu.so using RuntimeDetector.findPluginPath(.tpu)",
+            "2. Load plugin using PJRTPlugin",
+            "3. Call PJRT_Client_Create through the API",
+            "4. Return PJRTClient wrapping the created client"
+          ]
+        },
+        {
+          "name": "createGPU",
+          "signature": "public static func createGPU() throws -> PJRTClient",
+          "description": "Create GPU client by loading CUDA PJRT plugin",
+          "implementation": "Same pattern as createTPU but for GPU plugin"
+        },
+        {
+          "name": "createCPU",
+          "signature": "public static func createCPU() throws -> PJRTClient",
+          "description": "Create CPU client (may already exist, ensure consistent pattern)",
+          "note": "This method likely already exists - ensure it follows the same plugin loading pattern"
+        }
+      ],
+      "client_properties_to_add": [
+        {
+          "name": "acceleratorType",
+          "type": "AcceleratorType",
+          "description": "The accelerator type this client is using"
+        },
+        {
+          "name": "plugin",
+          "type": "PJRTPlugin?",
+          "description": "Reference to the loaded plugin (to prevent unloading)"
+        }
+      ]
+    },
+
+    "Errors": {
+      "file": "Sources/SwiftIRRuntime/Errors.swift",
+      "type": "enum SwiftIRError: Error",
+      "cases": [
+        {
+          "name": "pluginNotFound",
+          "associated_values": ["accelerator: AcceleratorType", "searchedPaths: [String]"],
+          "description": "No plugin found for the requested accelerator"
+        },
+        {
+          "name": "pluginLoadFailed",
+          "associated_values": ["path: String", "reason: String"],
+          "description": "Failed to load plugin with dlopen"
+        },
+        {
+          "name": "symbolNotFound",
+          "associated_values": ["symbol: String", "path: String"],
+          "description": "Required symbol not found in plugin"
+        },
+        {
+          "name": "clientCreationFailed",
+          "associated_values": ["accelerator: AcceleratorType", "reason: String"],
+          "description": "PJRT_Client_Create failed"
+        },
+        {
+          "name": "acceleratorNotAvailable",
+          "associated_values": ["accelerator: AcceleratorType"],
+          "description": "Requested accelerator is not available on this system"
+        }
+      ],
+      "protocols": ["LocalizedError"],
+      "implement": "errorDescription property for user-friendly messages"
+    }
+  },
+
+  "tests": {
+    "unit_tests": {
+      "directory": "Tests/SwiftIRRuntimeTests/",
+      "test_files": [
+        {
+          "file": "AcceleratorTypeTests.swift",
+          "tests": [
+            "testRawValues - verify CPU/GPU/TPU raw values",
+            "testDescription - verify description matches rawValue",
+            "testPluginName - verify correct plugin names",
+            "testEquatable - verify equality comparison",
+            "testHashable - verify hashing works",
+            "testCodable - verify encode/decode roundtrip"
+          ]
+        },
+        {
+          "file": "RuntimeDetectorTests.swift",
+          "tests": [
+            "testDetectReturnsValidType - detect() returns valid AcceleratorType",
+            "testEnvironmentOverride - PJRT_DEVICE env var overrides detection",
+            "testTPUDetectionWithAccelDevices - mock /dev/accel0 detection",
+            "testTPUDetectionWithLibtpu - mock libtpu.so detection",
+            "testGPUDetectionWithNvidiaDevice - mock /dev/nvidia0 detection",
+            "testGPUDetectionWithCUDALibs - mock CUDA library detection",
+            "testFallbackToCPU - returns CPU when no accelerator found",
+            "testGetRuntimeInfo - returns valid RuntimeInfo struct",
+            "testFindPluginPath - finds correct paths for each type"
+          ]
+        },
+        {
+          "file": "PJRTPluginTests.swift",
+          "tests": [
+            "testLoadInvalidPath - throws appropriate error",
+            "testLoadMissingSymbol - throws symbolNotFound error",
+            "testDeinit - plugin is properly unloaded"
+          ],
+          "note": "Full plugin loading tests require actual plugins, use mocks for unit tests"
+        },
+        {
+          "file": "PJRTClientUnifiedTests.swift",
+          "tests": [
+            "testCreateWithAutoDetect - create() uses detected accelerator",
+            "testCreateWithExplicitCPU - create(.cpu) creates CPU client",
+            "testCreateTPUWithoutTPU - throws acceleratorNotAvailable",
+            "testCreateGPUWithoutGPU - throws acceleratorNotAvailable"
+          ]
+        }
+      ]
+    },
+    "integration_tests": {
+      "directory": "Tests/SwiftIRIntegrationTests/",
+      "test_files": [
+        {
+          "file": "CPUClientIntegrationTests.swift",
+          "tests": [
+            "testCreateCPUClient - creates CPU client successfully",
+            "testCPUClientDevices - lists CPU devices",
+            "testCPUClientCompileAndExecute - compile and run simple StableHLO"
+          ],
+          "requirements": "pjrt_c_api_cpu_plugin.so must be available"
+        },
+        {
+          "file": "GPUClientIntegrationTests.swift",
+          "tests": [
+            "testCreateGPUClient - creates GPU client on GPU machine",
+            "testGPUClientDevices - lists GPU devices",
+            "testGPUClientCompileAndExecute - compile and run on GPU"
+          ],
+          "requirements": "Must run on machine with NVIDIA GPU",
+          "skip_condition": "!RuntimeDetector.isGPUAvailable()"
+        },
+        {
+          "file": "TPUClientIntegrationTests.swift",
+          "tests": [
+            "testCreateTPUClient - creates TPU client on TPU VM",
+            "testTPUClientDevices - lists TPU cores",
+            "testTPUClientCompileAndExecute - compile and run on TPU"
+          ],
+          "requirements": "Must run on TPU VM or Colab TPU runtime",
+          "skip_condition": "!RuntimeDetector.isTPUAvailable()"
+        }
+      ]
+    }
+  },
+
+  "success_criteria": {
+    "functional": [
+      {
+        "id": "F1",
+        "description": "RuntimeDetector.detect() returns .cpu on CPU-only machine",
+        "verification": "Run on Colab CPU runtime, verify returns .cpu"
+      },
+      {
+        "id": "F2",
+        "description": "RuntimeDetector.detect() returns .gpu on GPU machine",
+        "verification": "Run on Colab GPU runtime, verify returns .gpu"
+      },
+      {
+        "id": "F3",
+        "description": "RuntimeDetector.detect() returns .tpu on TPU VM",
+        "verification": "Run on Colab TPU v2 runtime, verify returns .tpu"
+      },
+      {
+        "id": "F4",
+        "description": "PJRT_DEVICE environment variable overrides auto-detection",
+        "verification": "Set PJRT_DEVICE=CPU on GPU machine, verify returns .cpu"
+      },
+      {
+        "id": "F5",
+        "description": "PJRTClient.create() works without arguments",
+        "verification": "Call create() on each runtime type, verify correct client created"
+      },
+      {
+        "id": "F6",
+        "description": "PJRTClient.create(.tpu) fails gracefully on non-TPU machine",
+        "verification": "Call create(.tpu) on CPU machine, verify throws acceleratorNotAvailable"
+      },
+      {
+        "id": "F7",
+        "description": "StableHLO compilation works on all backends",
+        "verification": "Compile simple add function on CPU/GPU/TPU, verify success"
+      },
+      {
+        "id": "F8",
+        "description": "Execution produces correct results on all backends",
+        "verification": "Execute add(tensor([1,2,3]), tensor([4,5,6])), verify result is [5,7,9]"
+      }
+    ],
+    "performance": [
+      {
+        "id": "P1",
+        "description": "Runtime detection completes in < 100ms",
+        "verification": "Measure detect() time, verify < 100ms"
+      },
+      {
+        "id": "P2",
+        "description": "Plugin loading completes in < 5 seconds",
+        "verification": "Measure plugin load time (first load may be slower due to JIT)"
+      }
+    ],
+    "usability": [
+      {
+        "id": "U1",
+        "description": "Error messages are clear and actionable",
+        "verification": "Trigger each error case, verify message explains what's wrong and how to fix"
+      },
+      {
+        "id": "U2",
+        "description": "getRuntimeInfo() provides useful debugging information",
+        "verification": "Call getRuntimeInfo(), verify all fields are populated correctly"
+      },
+      {
+        "id": "U3",
+        "description": "API is consistent with JAX patterns",
+        "verification": "Compare create() API with jax.devices() pattern"
+      }
+    ]
+  },
+
+  "build_system": {
+    "prebuilt_binaries": {
+      "description": "Build and distribute prebuilt binaries for easy Colab installation",
+      "target_platforms": [
+        {
+          "name": "linux-x86_64",
+          "os": "Ubuntu 22.04 / 24.04",
+          "arch": "x86_64",
+          "swift_version": "6.0+",
+          "primary_use": "Google Colab, Cloud TPU VMs"
+        }
+      ],
+      "artifacts": {
+        "tarball": {
+          "name": "SwiftIR-{version}-linux-x86_64.tar.gz",
+          "contents": [
+            "lib/libSwiftIR.so",
+            "lib/libSwiftIRRuntime.so",
+            "lib/libSwiftIRCore.so",
+            "lib/libSwiftIRTypes.so",
+            "lib/libSwiftIRDialects.so",
+            "lib/libSwiftIRBuilders.so",
+            "lib/libSwiftIRXLA.so",
+            "lib/libSwiftIRStableHLO.so",
+            "lib/libPJRTCWrappers.so",
+            "lib/pjrt_c_api_cpu_plugin.so",
+            "include/SwiftIR/",
+            "share/swiftir/module.modulemap",
+            "bin/swiftir-info"
+          ]
+        },
+        "install_script": {
+          "name": "install.sh",
+          "description": "Script to install SwiftIR to standard locations or custom prefix"
+        }
+      },
+      "bundled_dependencies": {
+        "cpu_plugin": {
+          "source": "Build from OpenXLA/XLA or download from JAX releases",
+          "artifact": "pjrt_c_api_cpu_plugin.so",
+          "note": "This is open source and can be bundled"
+        },
+        "mlir_libs": {
+          "source": "StableHLO project build",
+          "artifacts": ["libMLIR.so", "libstablehlo.so"],
+          "note": "Required for MLIR parsing"
+        }
+      },
+      "not_bundled": {
+        "gpu_plugin": {
+          "reason": "Large size, CUDA version dependent",
+          "instructions": "Users install via: pip install jax[cuda12]"
+        },
+        "tpu_plugin": {
+          "reason": "Proprietary, pre-installed on TPU VMs",
+          "instructions": "Already available on TPU runtimes"
+        }
+      }
+    },
+
+    "github_actions_workflow": {
+      "file": ".github/workflows/build-release.yml",
+      "triggers": ["push to tags v*", "manual workflow_dispatch"],
+      "jobs": [
+        {
+          "name": "build-linux",
+          "runs-on": "ubuntu-22.04",
+          "steps": [
+            "Checkout repository",
+            "Install Swift 6.0",
+            "Install MLIR/StableHLO dependencies",
+            "Build SwiftIR in release mode",
+            "Build/download CPU PJRT plugin",
+            "Run tests",
+            "Package tarball",
+            "Upload artifacts"
+          ]
+        },
+        {
+          "name": "create-release",
+          "needs": ["build-linux"],
+          "steps": [
+            "Download artifacts",
+            "Create GitHub release",
+            "Upload tarballs to release"
+          ]
+        }
+      ],
+      "workflow_template": "See build_workflow_template below"
+    },
+
+    "build_workflow_template": {
+      "file_content": "name: Build and Release\n\non:\n  push:\n    tags:\n      - 'v*'\n  workflow_dispatch:\n    inputs:\n      version:\n        description: 'Version to release'\n        required: true\n        default: '0.1.0'\n\njobs:\n  build-linux:\n    runs-on: ubuntu-22.04\n    \n    steps:\n    - name: Checkout\n      uses: actions/checkout@v4\n    \n    - name: Install Swift\n      uses: swift-actions/setup-swift@v2\n      with:\n        swift-version: '6.0'\n    \n    - name: Install Dependencies\n      run: |\n        sudo apt-get update\n        sudo apt-get install -y \\\n          cmake ninja-build \\\n          libxml2-dev libncurses-dev \\\n          python3 python3-pip\n        \n        # Install Bazel for XLA build\n        npm install -g @bazel/bazelisk\n    \n    - name: Build MLIR Dependencies\n      run: |\n        # Clone and build StableHLO with MLIR\n        git clone --depth 1 https://github.com/openxla/stablehlo.git\n        cd stablehlo\n        ./build_tools/build_mlir.sh\n    \n    - name: Build CPU PJRT Plugin\n      run: |\n        # Option 1: Download from JAX releases\n        pip install jax jaxlib\n        cp $(python -c \"import jax; print(jax.__path__[0])\")/../../jaxlib/pjrt_c_api_cpu_plugin.so lib/\n        \n        # Option 2: Build from XLA (alternative)\n        # git clone https://github.com/openxla/xla.git\n        # cd xla && bazel build //xla/pjrt/c:pjrt_c_api_cpu_plugin.so\n    \n    - name: Build SwiftIR\n      run: |\n        swift build -c release \\\n          -Xcc -I/path/to/mlir/include \\\n          -Xlinker -L/path/to/mlir/lib\n    \n    - name: Run Tests\n      run: swift test\n    \n    - name: Package Release\n      run: |\n        VERSION=${{ github.ref_name || inputs.version }}\n        mkdir -p SwiftIR-${VERSION}-linux-x86_64/{lib,include,bin}\n        \n        # Copy libraries\n        cp .build/release/*.so SwiftIR-${VERSION}-linux-x86_64/lib/\n        cp lib/pjrt_c_api_cpu_plugin.so SwiftIR-${VERSION}-linux-x86_64/lib/\n        \n        # Copy headers/modules\n        cp -r .build/release/SwiftIR.swiftmodule SwiftIR-${VERSION}-linux-x86_64/include/\n        \n        # Create tarball\n        tar -czvf SwiftIR-${VERSION}-linux-x86_64.tar.gz SwiftIR-${VERSION}-linux-x86_64/\n    \n    - name: Upload Artifact\n      uses: actions/upload-artifact@v4\n      with:\n        name: swiftir-linux-x86_64\n        path: SwiftIR-*-linux-x86_64.tar.gz\n\n  release:\n    needs: build-linux\n    runs-on: ubuntu-latest\n    if: startsWith(github.ref, 'refs/tags/')\n    \n    steps:\n    - name: Download Artifacts\n      uses: actions/download-artifact@v4\n    \n    - name: Create Release\n      uses: softprops/action-gh-release@v1\n      with:\n        files: |\n          swiftir-linux-x86_64/*.tar.gz\n        generate_release_notes: true"
+    },
+
+    "colab_installation": {
+      "description": "How users will install SwiftIR in Colab",
+      "steps": [
+        {
+          "step": 1,
+          "description": "Download and extract SwiftIR",
+          "code": "!curl -L https://github.com/pedronahum/SwiftIR/releases/latest/download/SwiftIR-linux-x86_64.tar.gz | tar xz"
+        },
+        {
+          "step": 2,
+          "description": "Set library path",
+          "code": "%env LD_LIBRARY_PATH=/content/SwiftIR/lib:$LD_LIBRARY_PATH"
+        },
+        {
+          "step": 3,
+          "description": "Set SwiftIR home for plugin discovery",
+          "code": "%env SWIFTIR_HOME=/content/SwiftIR"
+        }
+      ],
+      "swift_kernel_integration": {
+        "description": "For swift-jupyter kernel users",
+        "setup_cell": "// Add to Package.swift or use %install directive\n// SwiftIR libraries are pre-downloaded\nimport SwiftIR\n\nlet client = try PJRTClient.create()\nprint(\"SwiftIR ready on \\(client.acceleratorType)\")"
+      }
+    }
+  },
+
+  "implementation_order": {
+    "phase1": {
+      "name": "Core Infrastructure",
+      "tasks": [
+        "Create SwiftIRRuntime module structure",
+        "Implement AcceleratorType enum",
+        "Implement SwiftIRError enum",
+        "Write unit tests for AcceleratorType"
+      ],
+      "estimated_effort": "2-3 hours"
+    },
+    "phase2": {
+      "name": "Runtime Detection",
+      "tasks": [
+        "Implement RuntimeDetector.isTPUAvailable()",
+        "Implement RuntimeDetector.isGPUAvailable()",
+        "Implement RuntimeDetector.detect()",
+        "Implement RuntimeDetector.findPluginPath()",
+        "Implement RuntimeDetector.getRuntimeInfo()",
+        "Write unit tests with mocked file system"
+      ],
+      "estimated_effort": "3-4 hours"
+    },
+    "phase3": {
+      "name": "Plugin Loading",
+      "tasks": [
+        "Implement PJRTPlugin class",
+        "Add dlopen/dlsym wrappers",
+        "Add error handling for plugin loading",
+        "Write unit tests"
+      ],
+      "estimated_effort": "2-3 hours"
+    },
+    "phase4": {
+      "name": "Unified Client API",
+      "tasks": [
+        "Implement PJRTClient.create() extension",
+        "Implement createTPU() method",
+        "Implement createGPU() method",
+        "Ensure createCPU() follows same pattern",
+        "Add acceleratorType property to PJRTClient",
+        "Write integration tests"
+      ],
+      "estimated_effort": "4-5 hours"
+    },
+    "phase5": {
+      "name": "Build System",
+      "tasks": [
+        "Create GitHub Actions workflow",
+        "Set up MLIR/StableHLO build",
+        "Configure CPU plugin bundling",
+        "Create release packaging script",
+        "Test on Colab environments"
+      ],
+      "estimated_effort": "4-6 hours"
+    },
+    "phase6": {
+      "name": "Documentation & Examples",
+      "tasks": [
+        "Update README with new API",
+        "Create Colab example notebook",
+        "Document installation process",
+        "Add troubleshooting guide"
+      ],
+      "estimated_effort": "2-3 hours"
+    }
+  },
+
+  "dependencies": {
+    "swift_packages": [],
+    "system_libraries": [
+      {
+        "name": "libdl",
+        "description": "Dynamic loading (dlopen, dlsym)",
+        "headers": ["dlfcn.h"],
+        "link_flags": ["-ldl"]
+      }
+    ],
+    "external_artifacts": [
+      {
+        "name": "PJRT C API Headers",
+        "source": "https://github.com/openxla/xla/tree/main/xla/pjrt/c",
+        "files": ["pjrt_c_api.h"],
+        "description": "Header defining PJRT_Api struct and related types"
+      },
+      {
+        "name": "StableHLO/MLIR",
+        "source": "https://github.com/openxla/stablehlo",
+        "description": "Required for MLIR parsing and StableHLO operations"
+      }
+    ]
+  },
+
+  "notes": {
+    "important_considerations": [
+      "The TPU plugin (libtpu.so) is proprietary and NOT open source - it cannot be bundled",
+      "GPU plugin is large and CUDA-version dependent - better to let users install via JAX",
+      "CPU plugin CAN be bundled as it's open source",
+      "Colab TPU runtime (TPU v2) has libtpu.so pre-installed at /lib/libtpu.so",
+      "Plugin loading must handle version mismatches gracefully",
+      "PJRT API has version compatibility - check api->pjrt_api_version"
+    ],
+    "testing_environments": [
+      "Colab CPU runtime - default, no accelerator",
+      "Colab GPU runtime - select GPU in runtime settings",
+      "Colab TPU v2 runtime - select TPU v2 in runtime settings",
+      "Cloud TPU VM - create via gcloud compute tpus tpu-vm create"
+    ],
+    "references": [
+      "https://openxla.org/xla/pjrt/pjrt_integration",
+      "https://github.com/openxla/xla/blob/main/xla/pjrt/c/pjrt_c_api.h",
+      "https://github.com/googlecolab/colabtools/issues/4481",
+      "https://cloud.google.com/tpu/docs/runtimes"
+    ]
+  }
+}

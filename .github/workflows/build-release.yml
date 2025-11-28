@@ -1,0 +1,429 @@
+name: Build and Release SwiftIR
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 0.1.0)'
+        required: true
+        default: '0.1.0'
+      skip_tests:
+        description: 'Skip running tests'
+        type: boolean
+        default: false
+
+env:
+  SWIFT_VERSION: main-snapshot-2025-11-03
+
+jobs:
+  # =============================================================
+  # Build SwiftIR on Ubuntu (uses pre-built dependencies)
+  # =============================================================
+  build-linux:
+    name: Build SwiftIR (Linux x86_64)
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Free Disk Space
+      run: |
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /opt/ghc
+        df -h
+
+    - name: Install System Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential cmake ninja-build git wget curl \
+          clang-18 lld-18 \
+          libc++-18-dev libc++abi-18-dev \
+          libicu-dev libssl-dev libxml2-dev \
+          libcurl4-openssl-dev libz-dev libzstd-dev \
+          libncurses-dev zlib1g-dev
+
+    - name: Install Swift
+      run: |
+        curl -L https://swiftlang.github.io/swiftly/swiftly-install.sh | bash
+        export PATH="$HOME/.local/bin:$PATH"
+        swiftly install ${{ env.SWIFT_VERSION }}
+        swiftly use ${{ env.SWIFT_VERSION }}
+        swift --version
+
+    # Download pre-built dependencies from a previous workflow run or release
+    - name: Download SwiftIR Dependencies
+      run: |
+        echo "Downloading pre-built dependencies..."
+        # Option 1: From GitHub release
+        # curl -L https://github.com/pedronahum/SwiftIR/releases/download/deps-v1/SwiftIR-dependencies-ubuntu.tar.gz | sudo tar xz -C /opt
+
+        # Option 2: Build from scratch (slower but complete)
+        # For now, we'll check if dependencies exist
+        if [ ! -d "/opt/swiftir-deps" ]; then
+          echo "Dependencies not found. This workflow requires pre-built dependencies."
+          echo "Run the 'Build Dependencies (Ubuntu)' workflow first."
+          exit 1
+        fi
+
+    - name: Setup Environment
+      run: |
+        # Create environment script
+        sudo tee /etc/profile.d/swiftir.sh > /dev/null << 'EOF'
+        export SWIFTIR_DEPS_DIR=/opt/swiftir-deps
+        export LD_LIBRARY_PATH=/opt/swiftir-deps/lib:$LD_LIBRARY_PATH
+        export LIBRARY_PATH=/opt/swiftir-deps/lib:$LIBRARY_PATH
+        export CPATH=/opt/swiftir-deps/include:$CPATH
+        export SWIFTIR_HOME=/opt/swiftir-deps
+        EOF
+
+        source /etc/profile.d/swiftir.sh
+        echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> $GITHUB_ENV
+        echo "LIBRARY_PATH=$LIBRARY_PATH" >> $GITHUB_ENV
+        echo "CPATH=$CPATH" >> $GITHUB_ENV
+        echo "SWIFTIR_HOME=$SWIFTIR_HOME" >> $GITHUB_ENV
+
+    - name: Build SwiftIR
+      run: |
+        export PATH="$HOME/.local/bin:$PATH"
+        source /etc/profile.d/swiftir.sh
+        swift build -c release
+
+    - name: Run Tests
+      if: ${{ !inputs.skip_tests }}
+      run: |
+        export PATH="$HOME/.local/bin:$PATH"
+        source /etc/profile.d/swiftir.sh
+        # Run SwiftIRRuntime tests (lightweight, no MLIR deps)
+        swift test --filter SwiftIRRuntimeTests
+
+    - name: Determine Version
+      id: version
+      run: |
+        if [ "${{ github.event_name }}" == "push" ]; then
+          VERSION=${GITHUB_REF#refs/tags/v}
+        else
+          VERSION=${{ github.event.inputs.version }}
+        fi
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Building version: $VERSION"
+
+    - name: Package Release
+      run: |
+        export PATH="$HOME/.local/bin:$PATH"
+        VERSION=${{ steps.version.outputs.version }}
+        PACKAGE_NAME="SwiftIR-${VERSION}-linux-x86_64"
+
+        mkdir -p ${PACKAGE_NAME}/{lib,include,bin,share}
+
+        # Copy SwiftIR libraries
+        echo "Copying SwiftIR libraries..."
+        cp -v .build/release/*.so ${PACKAGE_NAME}/lib/ 2>/dev/null || true
+
+        # Copy Swift modules
+        echo "Copying Swift modules..."
+        for module in SwiftIR SwiftIRCore SwiftIRTypes SwiftIRDialects SwiftIRBuilders SwiftIRXLA SwiftIRStableHLO SwiftIRRuntime; do
+          if [ -d ".build/release/${module}.swiftmodule" ]; then
+            cp -r .build/release/${module}.swiftmodule ${PACKAGE_NAME}/include/
+          fi
+        done
+
+        # Copy essential runtime dependencies
+        echo "Copying runtime dependencies..."
+        cp -v /opt/swiftir-deps/lib/pjrt_c_api_cpu_plugin.so ${PACKAGE_NAME}/lib/ 2>/dev/null || true
+        cp -v /opt/swiftir-deps/lib/libSwiftIRMLIR.so ${PACKAGE_NAME}/lib/ 2>/dev/null || true
+        cp -v /opt/swiftir-deps/lib/libPJRTProtoHelper.so ${PACKAGE_NAME}/lib/ 2>/dev/null || true
+
+        # Copy LLVM/MLIR runtime libraries (only .so files needed at runtime)
+        for lib in LLVM MLIR; do
+          find /opt/swiftir-deps/lib -name "lib${lib}*.so*" -exec cp -v {} ${PACKAGE_NAME}/lib/ \; 2>/dev/null || true
+        done
+
+        # Create environment setup script
+        cat > ${PACKAGE_NAME}/setup.sh << 'SETUPEOF'
+        #!/bin/bash
+        # SwiftIR Environment Setup
+        # Source this file: source /path/to/SwiftIR/setup.sh
+
+        SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+        export SWIFTIR_HOME="$SCRIPT_DIR"
+        export LD_LIBRARY_PATH="$SCRIPT_DIR/lib:$LD_LIBRARY_PATH"
+        export LIBRARY_PATH="$SCRIPT_DIR/lib:$LIBRARY_PATH"
+
+        echo "SwiftIR environment configured!"
+        echo "  SWIFTIR_HOME=$SWIFTIR_HOME"
+        SETUPEOF
+        chmod +x ${PACKAGE_NAME}/setup.sh
+
+        # Create installation script
+        cat > ${PACKAGE_NAME}/install.sh << 'INSTALLEOF'
+        #!/bin/bash
+        set -e
+
+        PREFIX="${1:-/opt/swiftir}"
+        SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+        echo "Installing SwiftIR to ${PREFIX}..."
+
+        # Create directories
+        sudo mkdir -p "${PREFIX}"/{lib,include,bin,share}
+
+        # Copy files
+        sudo cp -r "${SCRIPT_DIR}/lib/"* "${PREFIX}/lib/"
+        sudo cp -r "${SCRIPT_DIR}/include/"* "${PREFIX}/include/" 2>/dev/null || true
+
+        # Create environment script
+        sudo tee /etc/profile.d/swiftir.sh > /dev/null << ENVSCRIPT
+        export SWIFTIR_HOME=${PREFIX}
+        export LD_LIBRARY_PATH=${PREFIX}/lib:\$LD_LIBRARY_PATH
+        export LIBRARY_PATH=${PREFIX}/lib:\$LIBRARY_PATH
+        ENVSCRIPT
+
+        # Update library cache
+        sudo ldconfig 2>/dev/null || true
+
+        echo ""
+        echo "Installation complete!"
+        echo "Run: source /etc/profile.d/swiftir.sh"
+        echo "Or add to your shell profile for permanent setup."
+        INSTALLEOF
+        chmod +x ${PACKAGE_NAME}/install.sh
+
+        # Create tarball
+        tar -czvf ${PACKAGE_NAME}.tar.gz ${PACKAGE_NAME}/
+
+        echo ""
+        echo "========================================="
+        echo "Package created: ${PACKAGE_NAME}.tar.gz"
+        echo "========================================="
+        ls -lh ${PACKAGE_NAME}.tar.gz
+        echo ""
+        echo "Contents:"
+        tar -tzf ${PACKAGE_NAME}.tar.gz | head -30
+
+    - name: Create Package README
+      run: |
+        VERSION=${{ steps.version.outputs.version }}
+        PACKAGE_NAME="SwiftIR-${VERSION}-linux-x86_64"
+
+        # Extract the package to add README
+        tar xzf ${PACKAGE_NAME}.tar.gz
+
+        # Create README without backticks (use indentation for code)
+        cat > ${PACKAGE_NAME}/README.md << 'READMEEOF'
+        # SwiftIR Prebuilt Binary
+
+        SwiftIR: Swift for Intermediate Representation - Hardware-accelerated differentiable computing.
+
+        ## Quick Start (Google Colab)
+
+        In a Python cell, download and setup SwiftIR:
+
+            !curl -L https://github.com/pedronahum/SwiftIR/releases/latest/download/SwiftIR-linux-x86_64.tar.gz | tar xz -C /content
+            !mv /content/SwiftIR-* /content/SwiftIR
+            %env LD_LIBRARY_PATH=/content/SwiftIR/lib
+            %env SWIFTIR_HOME=/content/SwiftIR
+
+        Then with the swift-jupyter kernel:
+
+            import SwiftIRRuntime
+
+            // Check available accelerators
+            RuntimeDetector.printInfo()
+
+            // Auto-detect best accelerator
+            let accelerator = RuntimeDetector.detect()
+            print("Using: \(accelerator)")
+
+        ## Local Installation
+
+            # Option 1: Quick setup (no install)
+            source ./setup.sh
+
+            # Option 2: System-wide install
+            sudo ./install.sh              # Install to /opt/swiftir
+            sudo ./install.sh /usr/local   # Or custom prefix
+
+        ## Contents
+
+        - lib/ - Shared libraries (SwiftIR, MLIR, PJRT CPU plugin)
+        - include/ - Swift modules
+        - setup.sh - Environment setup script
+        - install.sh - System installation script
+
+        ## Accelerator Support
+
+        - CPU: pjrt_c_api_cpu_plugin.so - Bundled and ready
+        - GPU: xla_cuda_plugin.so - Install via pip install jax[cuda12]
+        - TPU: libtpu.so - Pre-installed on TPU VMs
+
+        ## Requirements
+
+        - Linux x86_64 (Ubuntu 22.04+ recommended)
+        - Swift 6.0+ runtime (for development)
+
+        ## More Information
+
+        - GitHub: https://github.com/pedronahum/SwiftIR
+        - Documentation: See repository README
+        READMEEOF
+
+        # Re-create tarball with README
+        rm ${PACKAGE_NAME}.tar.gz
+        tar -czvf ${PACKAGE_NAME}.tar.gz ${PACKAGE_NAME}/
+
+    - name: Upload Build Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: swiftir-linux-x86_64
+        path: SwiftIR-*-linux-x86_64.tar.gz
+        retention-days: 14
+
+  # =============================================================
+  # Test the packaged release
+  # =============================================================
+  test-package:
+    name: Test Package (Ubuntu)
+    needs: build-linux
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Install Swift
+      run: |
+        curl -L https://swiftlang.github.io/swiftly/swiftly-install.sh | bash
+        export PATH="$HOME/.local/bin:$PATH"
+        swiftly install ${{ env.SWIFT_VERSION }}
+        swiftly use ${{ env.SWIFT_VERSION }}
+
+    - name: Download Artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: swiftir-linux-x86_64
+
+    - name: Test Extraction and Setup
+      run: |
+        echo "Extracting package..."
+        tar xzf SwiftIR-*-linux-x86_64.tar.gz
+
+        echo ""
+        echo "Package contents:"
+        ls -la SwiftIR-*/
+
+        echo ""
+        echo "Libraries:"
+        ls -la SwiftIR-*/lib/
+
+        echo ""
+        echo "Setting up environment..."
+        cd SwiftIR-*
+        source ./setup.sh
+
+        echo ""
+        echo "Verifying CPU plugin..."
+        if [ -f "lib/pjrt_c_api_cpu_plugin.so" ]; then
+          echo "CPU PJRT plugin found"
+        else
+          echo "CPU PJRT plugin missing"
+          exit 1
+        fi
+
+  # =============================================================
+  # Create GitHub Release
+  # =============================================================
+  release:
+    name: Create Release
+    needs: [build-linux, test-package]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Download All Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: Prepare Release Assets
+      run: |
+        mkdir release-assets
+        cp artifacts/swiftir-linux-x86_64/*.tar.gz release-assets/
+
+        # Create a version-agnostic symlink name for "latest"
+        cd release-assets
+        for f in SwiftIR-*-linux-x86_64.tar.gz; do
+          cp "$f" SwiftIR-linux-x86_64.tar.gz
+        done
+
+        ls -la
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: release-assets/*.tar.gz
+        generate_release_notes: true
+        draft: false
+        prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
+        body: |
+          ## SwiftIR ${{ github.ref_name }}
+
+          Swift for Intermediate Representation - Hardware-accelerated differentiable computing.
+
+          ### Installation
+
+          #### Google Colab (Recommended for TPU)
+
+          Download and extract in a Python cell:
+
+              !curl -L https://github.com/pedronahum/SwiftIR/releases/download/${{ github.ref_name }}/SwiftIR-linux-x86_64.tar.gz | tar xz -C /content
+              !mv /content/SwiftIR-* /content/SwiftIR
+              %env LD_LIBRARY_PATH=/content/SwiftIR/lib
+              %env SWIFTIR_HOME=/content/SwiftIR
+
+          #### Local Linux Installation
+
+              # Download
+              curl -LO https://github.com/pedronahum/SwiftIR/releases/download/${{ github.ref_name }}/SwiftIR-linux-x86_64.tar.gz
+              tar xzf SwiftIR-linux-x86_64.tar.gz
+              cd SwiftIR-*
+
+              # Quick setup
+              source ./setup.sh
+
+              # Or system-wide install
+              sudo ./install.sh
+
+          ### What's Included
+
+          - SwiftIR core libraries with automatic differentiation
+          - CPU PJRT plugin (bundled) - works out of the box
+          - Runtime detection for CPU/GPU/TPU
+          - Swift modules for development
+
+          ### Accelerator Support
+
+          - CPU: Ready (plugin bundled)
+          - GPU: Install jax[cuda12] for CUDA plugin
+          - TPU: Ready on TPU VMs/Colab TPU
+
+          ### Quick Test
+
+              import SwiftIRRuntime
+
+              // Detect available accelerators
+              RuntimeDetector.printInfo()
+
+              // Use auto-detected accelerator
+              let accelerator = RuntimeDetector.detect()
+              print("Best accelerator: \(accelerator)")
+
+          See the [full documentation](https://github.com/pedronahum/SwiftIR#readme) for more examples.

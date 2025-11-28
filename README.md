@@ -146,6 +146,64 @@ This allows SwiftIR to:
 | **While Loop Support** | ✅ Complete | Native `stablehlo.while` with constant compile time |
 | **XLA Compilation** | ✅ Complete | Industry-standard optimizer |
 | **PJRT Execution** | ✅ Complete | CPU execution (GPU ready, needs MLIR rebuild) |
+| **Runtime Detection** | ✅ Complete | Automatic CPU/GPU/TPU detection |
+
+## Unified Runtime API
+
+SwiftIR provides automatic hardware detection and a unified API similar to JAX's device discovery:
+
+```swift
+import SwiftIRRuntime
+
+// Automatic detection - uses best available accelerator
+let accelerator = RuntimeDetector.detect()  // Returns .tpu, .gpu, or .cpu
+print("Using: \(accelerator)")  // "Using: CPU"
+
+// Check specific hardware availability
+if RuntimeDetector.isTPUAvailable() {
+    print("TPU cores: \(RuntimeDetector.countTPUCores() ?? 0)")
+}
+
+// Get detailed runtime information
+RuntimeDetector.printInfo()
+// Output:
+// ┌────────────────────────────────────────┐
+// │ SwiftIR Runtime Info                   │
+// ├────────────────────────────────────────┤
+// │ Detected accelerator: CPU              │
+// │ TPU available: false                   │
+// │ GPU available: false                   │
+// │ CPU plugin: /opt/swiftir-deps/lib/...  │
+// └────────────────────────────────────────┘
+
+// Create PJRT client with automatic detection
+let client = try PJRTClientFactory.create()        // Auto-detect best
+let cpuClient = try PJRTClientFactory.create(.cpu) // Force CPU
+```
+
+### Accelerator Priority
+
+Detection follows TPU → GPU → CPU priority (like JAX):
+
+| Accelerator | Plugin | Detection Method |
+|-------------|--------|------------------|
+| **TPU** | `libtpu.so` | `/dev/accel*`, `TPU_NAME` env, Colab runtime |
+| **GPU** | `xla_cuda_plugin.so` | `/dev/nvidia*`, CUDA libraries |
+| **CPU** | `pjrt_c_api_cpu_plugin.so` | Always available (bundled) |
+
+### Environment Variables
+
+Override detection with environment variables:
+
+```bash
+# Force specific accelerator
+export SWIFTIR_ACCELERATOR=GPU
+
+# Custom plugin paths
+export PJRT_CPU_PLUGIN_PATH=/custom/path/cpu_plugin.so
+export PJRT_GPU_PLUGIN_PATH=/custom/path/cuda_plugin.so
+export TPU_LIBRARY_PATH=/custom/path/libtpu.so
+```
 
 ## Architecture
 
@@ -176,6 +234,13 @@ This allows SwiftIR to:
 │ • Industry-standard optimizations                           │
 │ • Operation fusion (forward + backward together)            │
 │ • Target-specific code generation                           │
+└─────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────┐
+│ Runtime Detection (SwiftIRRuntime)                          │
+│ • Automatic TPU → GPU → CPU detection                       │
+│ • Dynamic PJRT plugin loading                               │
+│ • JAX-compatible device discovery                           │
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -290,7 +355,35 @@ let (loss, gradient) = try gradFunc.forwardWithGradient([0.0], seed: [1.0])
 
 ## Installation & Setup
 
-### Step 1: Install Dependencies
+### Option 1: Prebuilt Binaries (Recommended for Colab/Quick Start)
+
+Download prebuilt binaries with bundled CPU plugin - no compilation required:
+
+```bash
+# Download and extract
+curl -LO https://github.com/pedronahum/SwiftIR/releases/latest/download/SwiftIR-linux-x86_64.tar.gz
+tar xzf SwiftIR-linux-x86_64.tar.gz
+cd SwiftIR-*
+
+# Quick setup (sets LD_LIBRARY_PATH)
+source ./setup.sh
+
+# Or system-wide install
+sudo ./install.sh
+```
+
+**Google Colab:**
+```python
+# Cell 1: Download SwiftIR
+!curl -L https://github.com/pedronahum/SwiftIR/releases/latest/download/SwiftIR-linux-x86_64.tar.gz | tar xz -C /content
+!mv /content/SwiftIR-* /content/SwiftIR
+
+# Set environment
+%env LD_LIBRARY_PATH=/content/SwiftIR/lib
+%env SWIFTIR_HOME=/content/SwiftIR
+```
+
+### Option 2: Build from Source
 
 SwiftIR requires Swift 6.0+, LLVM/MLIR, StableHLO, and XLA/PJRT libraries. Installation scripts are provided in the `scripts/` folder for Ubuntu.
 
@@ -387,17 +480,25 @@ Sources/
 │       ├── BackendCompilation.swift  # MLIR generation
 │       └── PJRTExecution.swift       # Runtime execution
 │
+├── SwiftIRRuntime/          # Runtime detection & unified API ⭐
+│   ├── AcceleratorType.swift    # CPU/GPU/TPU enum
+│   ├── RuntimeDetector.swift    # Auto-detection logic
+│   ├── PJRTPlugin.swift         # Dynamic plugin loading
+│   └── PJRTClientUnified.swift  # Unified client factory
+│
 ├── SwiftIRXLA/              # XLA/PJRT integration
 └── PJRTCWrappers/           # PJRT C API wrappers
 
 Examples/
 ├── BuildingSimulation_SwiftIR.swift   # Physics simulation benchmark
 ├── BuildingSimulation_StandardSwift.swift  # Comparison baseline
+├── RuntimeInfo.swift                  # Runtime detection example
 ├── BENCHMARK_RESULTS.md               # Full performance data
 └── PJRT_NeuralNet_Example.swift       # Neural network example
 
-Tests/SwiftIRTests/
-└── Phase9-Phase38*.swift    # 300+ autodiff tests
+Tests/
+├── SwiftIRTests/            # 300+ autodiff tests
+└── SwiftIRRuntimeTests/     # 43 runtime detection tests
 ```
 
 ## Documentation
@@ -414,6 +515,8 @@ Tests/SwiftIRTests/
 - Are building **iOS/macOS ML applications** natively
 - Want **production runtime** (same as JAX/TensorFlow)
 - Need **low gradient overhead** (~1.0x vs 2.5-4.3x)
+- Want **automatic CPU/GPU/TPU detection** like JAX
+- Need **easy Colab deployment** with prebuilt binaries
 
 ### ❌ Don't use SwiftIR if you:
 - Need Python ecosystem (use JAX/PyTorch)
