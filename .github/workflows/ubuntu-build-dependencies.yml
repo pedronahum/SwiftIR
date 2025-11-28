@@ -55,14 +55,19 @@ jobs:
 
       - name: Install Swift Development Snapshot
         run: |
-          # Install swiftly with Ubuntu 22.04 platform (compatible with 24.04)
-          export SWIFTLY_PLATFORM="ubuntu2204"
-          curl -L https://swiftlang.github.io/swiftly/swiftly-install.sh | bash -s -- -y
-          export PATH="$HOME/.local/bin:$PATH"
+          # Download Swift directly instead of using swiftly (Ubuntu 24.04 not supported by swiftly)
+          SWIFT_URL="https://download.swift.org/development/ubuntu2204/swift-DEVELOPMENT-SNAPSHOT-2025-11-03-a/swift-DEVELOPMENT-SNAPSHOT-2025-11-03-a-ubuntu22.04.tar.gz"
 
-          # Install Swift development snapshot
-          swiftly install ${{ env.SWIFT_VERSION }}
-          swiftly use ${{ env.SWIFT_VERSION }}
+          echo "Downloading Swift development snapshot..."
+          curl -L "$SWIFT_URL" -o /tmp/swift.tar.gz
+
+          echo "Extracting Swift..."
+          sudo mkdir -p /opt/swift
+          sudo tar xzf /tmp/swift.tar.gz -C /opt/swift --strip-components=1
+
+          echo "Setting up PATH..."
+          echo "/opt/swift/usr/bin" >> $GITHUB_PATH
+          export PATH="/opt/swift/usr/bin:$PATH"
 
           # Verify installation
           swift --version
