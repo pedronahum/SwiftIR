@@ -55,18 +55,27 @@ jobs:
         swiftly use ${{ env.SWIFT_VERSION }}
         swift --version
 
-    # Download pre-built dependencies from a previous workflow run or release
+    # Download pre-built dependencies from artifact or release
     - name: Download SwiftIR Dependencies
-      run: |
-        echo "Downloading pre-built dependencies..."
-        # Option 1: From GitHub release
-        # curl -L https://github.com/pedronahum/SwiftIR/releases/download/deps-v1/SwiftIR-dependencies-ubuntu.tar.gz | sudo tar xz -C /opt
+      uses: dawidd6/action-download-artifact@v3
+      with:
+        workflow: ubuntu-build-dependencies.yml
+        name: swiftir-dependencies-ubuntu
+        path: /tmp/deps
+      continue-on-error: true
 
-        # Option 2: Build from scratch (slower but complete)
-        # For now, we'll check if dependencies exist
-        if [ ! -d "/opt/swiftir-deps" ]; then
-          echo "Dependencies not found. This workflow requires pre-built dependencies."
-          echo "Run the 'Build Dependencies (Ubuntu)' workflow first."
+    - name: Extract Dependencies
+      run: |
+        if [ -f "/tmp/deps/SwiftIR-dependencies-ubuntu.tar.gz" ]; then
+          echo "Extracting dependencies from artifact..."
+          sudo tar xzf /tmp/deps/SwiftIR-dependencies-ubuntu.tar.gz -C /opt
+          echo "Dependencies extracted to /opt/swiftir-deps"
+          ls -la /opt/swiftir-deps/lib/ | head -20
+        else
+          echo "Dependencies artifact not found."
+          echo "Please run the 'Build Dependencies (Ubuntu)' workflow first."
+          echo ""
+          echo "Go to: Actions -> Build Dependencies (Ubuntu) -> Run workflow"
           exit 1
         fi
 
