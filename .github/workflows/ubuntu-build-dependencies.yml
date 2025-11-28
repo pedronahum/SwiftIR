@@ -69,9 +69,11 @@ jobs:
 
       - name: Install Bazelisk
         run: |
-          sudo wget -O /usr/local/bin/bazelisk \
+          # Use curl instead of wget (curl is more reliably available)
+          sudo curl -L -o /usr/local/bin/bazelisk \
             https://github.com/bazelbuild/bazelisk/releases/download/v1.19.0/bazelisk-linux-amd64
           sudo chmod +x /usr/local/bin/bazelisk
+          bazelisk version || echo "Bazelisk installed (version check may fail without a workspace)"
 
       - name: Install Swift Development Snapshot
         run: |
