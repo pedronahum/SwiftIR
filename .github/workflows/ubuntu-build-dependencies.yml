@@ -55,8 +55,9 @@ jobs:
 
       - name: Install Swift Development Snapshot
         run: |
-          # Install swiftly
-          curl -L https://swiftlang.github.io/swiftly/swiftly-install.sh | bash
+          # Install swiftly with Ubuntu 22.04 platform (compatible with 24.04)
+          export SWIFTLY_PLATFORM="ubuntu2204"
+          curl -L https://swiftlang.github.io/swiftly/swiftly-install.sh | bash -s -- -y
           export PATH="$HOME/.local/bin:$PATH"
 
           # Install Swift development snapshot
