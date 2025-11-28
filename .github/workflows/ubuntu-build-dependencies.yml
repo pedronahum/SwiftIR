@@ -28,10 +28,30 @@ jobs:
 
       - name: Free Disk Space
         run: |
-          # Free up disk space for the large builds
+          # Aggressively free up disk space for the large builds (LLVM + XLA need ~50GB)
+          echo "Before cleanup:"
+          df -h
+
+          # Remove large pre-installed software
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /opt/ghc
           sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/local/.ghcup
+          sudo rm -rf /usr/share/swift
+          sudo rm -rf /usr/local/share/powershell
+          sudo rm -rf /usr/local/lib/node_modules
+
+          # Remove docker images
+          docker system prune -af 2>/dev/null || true
+
+          # Clean apt cache
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
+
+          echo ""
+          echo "After cleanup:"
           df -h
 
       - name: Install System Dependencies
@@ -127,6 +147,11 @@ jobs:
             sed -i '2040,2042c\  if (ARG_DEPENDS)\n    foreach(dep IN LISTS ARG_DEPENDS)\n      if(TARGET ${dep})\n        add_dependencies(${target} ${dep})\n      endif()\n    endforeach()\n  endif()' "$ADDLLVM_FILE"
           fi
 
+          # Clean up LLVM build directory to free space for XLA build
+          echo "Cleaning up LLVM build directory..."
+          rm -rf ~/swiftir-build/llvm-project
+          df -h
+
       # ============================================================
       # 3. Build StableHLO
       # ============================================================
@@ -164,6 +189,11 @@ jobs:
           # Copy headers
           mkdir -p /opt/swiftir-deps/include/stablehlo
           cp -r ../stablehlo /opt/swiftir-deps/include/ || true
+
+          # Clean up StableHLO build directory
+          echo "Cleaning up StableHLO build directory..."
+          rm -rf ~/swiftir-build/stablehlo
+          df -h
 
       # ============================================================
       # 4. Build XLA PJRT Plugin
