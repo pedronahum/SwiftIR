@@ -142,19 +142,32 @@ jobs:
         VERSION=${{ steps.version.outputs.version }}
         PACKAGE_NAME="SwiftIR-${VERSION}-linux-x86_64"
 
-        mkdir -p ${PACKAGE_NAME}/{lib,include,bin,share}
+        mkdir -p ${PACKAGE_NAME}/{lib,include,bin,share,swift-modules}
+
+        # Set the correct build directory path
+        BUILD_DIR=".build/x86_64-unknown-linux-gnu/release"
 
         # Copy SwiftIR libraries
         echo "Copying SwiftIR libraries..."
-        cp -v .build/release/*.so ${PACKAGE_NAME}/lib/ 2>/dev/null || true
+        cp -v ${BUILD_DIR}/*.so ${PACKAGE_NAME}/lib/ 2>/dev/null || true
+        cp -v ${BUILD_DIR}/*.a ${PACKAGE_NAME}/lib/ 2>/dev/null || true
 
-        # Copy Swift modules
+        # Copy Swift modules (they are files in $BUILD_DIR/Modules/)
         echo "Copying Swift modules..."
+        mkdir -p ${PACKAGE_NAME}/swift-modules
         for module in SwiftIR SwiftIRCore SwiftIRTypes SwiftIRDialects SwiftIRBuilders SwiftIRXLA SwiftIRStableHLO SwiftIRRuntime; do
-          if [ -d ".build/release/${module}.swiftmodule" ]; then
-            cp -r .build/release/${module}.swiftmodule ${PACKAGE_NAME}/include/
+          if [ -f "${BUILD_DIR}/Modules/${module}.swiftmodule" ]; then
+            cp -v "${BUILD_DIR}/Modules/${module}.swiftmodule" ${PACKAGE_NAME}/swift-modules/
+            echo "  ✅ Copied ${module}.swiftmodule"
+          else
+            echo "  ⚠️ Not found: ${module}.swiftmodule"
           fi
         done
+
+        # Debug: show what modules are available
+        echo ""
+        echo "Available modules in build directory:"
+        ls -la "${BUILD_DIR}/Modules/"*.swiftmodule 2>/dev/null | head -20 || echo "No .swiftmodule files found"
 
         # Copy essential runtime dependencies
         echo "Copying runtime dependencies..."
