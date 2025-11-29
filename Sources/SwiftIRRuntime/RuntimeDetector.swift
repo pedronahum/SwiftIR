@@ -108,9 +108,10 @@ public struct RuntimeDetector {
     /// Check if TPU hardware is available
     ///
     /// Detection methods:
-    /// 1. Check for `/dev/accel*` devices (TPU chips)
-    /// 2. Check for `libtpu.so` in known locations
-    /// 3. Check `TPU_NAME` environment variable
+    /// 1. Check for `/dev/accel*` devices (TPU chips on TPU VMs)
+    /// 2. Check Colab TPU environment variables (COLAB_TPU_1VM, TPU_ACCELERATOR_TYPE)
+    /// 3. Check for `libtpu.so` in known locations
+    /// 4. Check `TPU_NAME` environment variable (Cloud TPU)
     ///
     /// - Returns: `true` if TPU is available
     public static func isTPUAvailable() -> Bool {
@@ -121,13 +122,26 @@ public struct RuntimeDetector {
             }
         }
 
-        // Method 2: Check libtpu.so in known locations
-        if findPluginPath(for: .tpu) != nil {
-            return true
+        // Method 2: Check Colab TPU environment (v5e and newer don't have /dev/accel)
+        if ProcessInfo.processInfo.environment["COLAB_TPU_1VM"] != nil {
+            // Colab TPU runtime - verify libtpu.so exists
+            if findPluginPath(for: .tpu) != nil {
+                return true
+            }
         }
 
-        // Method 3: Check TPU_NAME env (Cloud TPU)
-        if ProcessInfo.processInfo.environment["TPU_NAME"] != nil {
+        // Also check TPU_ACCELERATOR_TYPE (e.g., "v5e-1")
+        if ProcessInfo.processInfo.environment["TPU_ACCELERATOR_TYPE"] != nil {
+            if findPluginPath(for: .tpu) != nil {
+                return true
+            }
+        }
+
+        // Method 3: Check libtpu.so in known locations (only if we have some TPU indicator)
+        // Don't return true just because libtpu.so exists - need hardware indicator too
+
+        // Method 4: Check TPU_NAME env (Cloud TPU)
+        if let tpuName = ProcessInfo.processInfo.environment["TPU_NAME"], !tpuName.isEmpty {
             return true
         }
 
@@ -140,6 +154,7 @@ public struct RuntimeDetector {
     public static func countTPUCores() -> Int? {
         guard isTPUAvailable() else { return nil }
 
+        // Method 1: Count /dev/accel* devices
         var chipCount = 0
         for i in 0..<8 {
             if FileManager.default.fileExists(atPath: "/dev/accel\(i)") {
@@ -152,6 +167,24 @@ public struct RuntimeDetector {
         // TPU v3-8 has 4 chips = 8 cores
         if chipCount > 0 {
             return chipCount * 2
+        }
+
+        // Method 2: Parse TPU_CHIPS_PER_HOST_BOUNDS for Colab v5e (e.g., "2,2,1" = 4 chips)
+        if let bounds = ProcessInfo.processInfo.environment["TPU_CHIPS_PER_HOST_BOUNDS"] {
+            let dims = bounds.split(separator: ",").compactMap { Int($0) }
+            if dims.count == 3 {
+                let totalChips = dims.reduce(1, *)
+                return totalChips * 2  // 2 cores per chip
+            }
+        }
+
+        // Method 3: Check TPU_ACCELERATOR_TYPE for v5e (e.g., "v5e-1" = 1 chip = 2 cores)
+        if let accType = ProcessInfo.processInfo.environment["TPU_ACCELERATOR_TYPE"] {
+            // v5e-1, v5e-4, v5e-8 etc - the number indicates chips
+            if accType.hasPrefix("v5e-"), let chipStr = accType.split(separator: "-").last,
+               let chips = Int(chipStr) {
+                return chips * 2
+            }
         }
 
         // Default to 8 cores for Cloud TPU (v2-8/v3-8)
@@ -252,7 +285,11 @@ public struct RuntimeDetector {
                 // System locations (Colab TPU runtime)
                 "/lib/libtpu.so",
                 "/usr/local/lib/libtpu.so",
-                // Python package locations
+                // Colab TPU v5e location (installed via pip)
+                "/usr/local/lib/python3.10/dist-packages/libtpu/libtpu.so",
+                "/usr/local/lib/python3.11/dist-packages/libtpu/libtpu.so",
+                "/usr/local/lib/python3.12/dist-packages/libtpu/libtpu.so",
+                // User Python package locations
                 expandPath("~/.local/lib/python3.10/site-packages/libtpu/libtpu.so"),
                 expandPath("~/.local/lib/python3.11/site-packages/libtpu/libtpu.so"),
                 expandPath("~/.local/lib/python3.12/site-packages/libtpu/libtpu.so"),
@@ -304,6 +341,9 @@ public struct RuntimeDetector {
             "PJRT_DEVICE",
             "TPU_NAME",
             "TPU_LIBRARY_PATH",
+            "TPU_ACCELERATOR_TYPE",
+            "COLAB_TPU_1VM",
+            "TPU_CHIPS_PER_HOST_BOUNDS",
             "CUDA_VISIBLE_DEVICES",
             "SWIFTIR_HOME",
             "PJRT_CPU_PLUGIN_PATH",
