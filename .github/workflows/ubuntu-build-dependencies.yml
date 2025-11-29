@@ -16,7 +16,7 @@ env:
 jobs:
   build-dependencies:
     name: Build LLVM, StableHLO, and XLA Dependencies
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
 
     steps:
       # ============================================================
@@ -57,11 +57,17 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
+
+          # Add LLVM apt repository for clang-18 on Ubuntu 22.04
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+          echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-18 main" | sudo tee /etc/apt/sources.list.d/llvm-18.list
+          sudo apt-get update
+
           sudo apt-get install -y \
             build-essential cmake ninja-build git wget curl pkg-config tzdata \
             clang-18 llvm-18-dev lld-18 \
             libc++-18-dev libc++abi-18-dev \
-            libc6-dev libstdc++-13-dev \
+            libc6-dev libstdc++-11-dev \
             libicu-dev libssl-dev libxml2-dev \
             libcurl4-openssl-dev libz-dev libzstd-dev \
             libncurses-dev zlib1g-dev libsqlite3-dev libpython3-dev \
@@ -393,7 +399,52 @@ jobs:
           # swift test
 
       # ============================================================
-      # 7. Package and Upload Artifacts
+      # 7. Build Pre-compiled Swift Modules
+      # ============================================================
+
+      - name: Build Swift Modules for Jupyter Integration
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          export SWIFTIR_DEPS_DIR=/opt/swiftir-deps
+          export LD_LIBRARY_PATH=/opt/swiftir-deps/lib:$LD_LIBRARY_PATH
+          export LIBRARY_PATH=/opt/swiftir-deps/lib:$LIBRARY_PATH
+          export CPATH=/opt/swiftir-deps/include:$CPATH
+
+          echo "Building Swift modules in release mode..."
+          swift build -c release
+
+          # Create swift-modules directory in deps
+          mkdir -p /opt/swiftir-deps/swift-modules
+
+          # Copy .swiftmodule files for all SwiftIR targets
+          echo "Copying Swift modules..."
+          BUILD_DIR=".build/x86_64-unknown-linux-gnu/release"
+
+          # Copy all SwiftIR modules
+          for module in SwiftIR SwiftIRCore SwiftIRTypes SwiftIRDialects SwiftIRBuilders SwiftIRXLA SwiftIRStableHLO SwiftIRRuntime; do
+            if [ -d "$BUILD_DIR/Modules/${module}.swiftmodule" ]; then
+              cp -r "$BUILD_DIR/Modules/${module}.swiftmodule" /opt/swiftir-deps/swift-modules/
+              echo "  ✅ Copied ${module}.swiftmodule"
+            elif [ -f "$BUILD_DIR/${module}.swiftmodule" ]; then
+              cp "$BUILD_DIR/${module}.swiftmodule" /opt/swiftir-deps/swift-modules/
+              echo "  ✅ Copied ${module}.swiftmodule"
+            fi
+          done
+
+          # Also copy any .swiftinterface files
+          find "$BUILD_DIR" -name "*.swiftinterface" -exec cp {} /opt/swiftir-deps/swift-modules/ \; 2>/dev/null || true
+
+          # Copy built libraries
+          echo "Copying built Swift libraries..."
+          cp "$BUILD_DIR"/*.so /opt/swiftir-deps/lib/ 2>/dev/null || true
+          cp "$BUILD_DIR"/*.a /opt/swiftir-deps/lib/ 2>/dev/null || true
+
+          echo ""
+          echo "Swift modules packaged:"
+          ls -la /opt/swiftir-deps/swift-modules/ 2>/dev/null || echo "No modules found"
+
+      # ============================================================
+      # 8. Package and Upload Artifacts
       # ============================================================
 
       - name: Create Dependency Archive
@@ -407,6 +458,10 @@ jobs:
           echo "Archive contents:"
           tar -tzf ~/SwiftIR-dependencies-ubuntu.tar.gz | head -50
 
+          echo ""
+          echo "Swift modules in archive:"
+          tar -tzf ~/SwiftIR-dependencies-ubuntu.tar.gz | grep swift-modules || echo "None"
+
       - name: Upload Dependencies Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -415,7 +470,7 @@ jobs:
           retention-days: 30
 
       # ============================================================
-      # 8. Summary Report
+      # 9. Summary Report
       # ============================================================
 
       - name: Generate Build Report
@@ -425,7 +480,7 @@ jobs:
           # SwiftIR Dependencies Build Report (Ubuntu)
 
           ## System Information
-          - **Ubuntu Version:** 24.04
+          - **Ubuntu Version:** 22.04 (GLIBC 2.35 - Colab compatible)
           - **Swift Version:** ${{ env.SWIFT_VERSION }}
 
           ## Dependencies Built
