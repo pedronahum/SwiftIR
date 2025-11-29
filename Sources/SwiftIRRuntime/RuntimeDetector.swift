@@ -79,17 +79,17 @@ public struct RuntimeDetector {
 
     /// Detect the best available accelerator
     ///
-    /// Priority: Environment override > TPU > GPU > CPU
+    /// Priority: Environment override (if available) > TPU > GPU > CPU
     ///
     /// - Returns: The best available accelerator type
     public static func detect() -> AcceleratorType {
-        // Check environment override first
+        // Check environment override first, but only if hardware is actually available
         if let pjrtDevice = ProcessInfo.processInfo.environment["PJRT_DEVICE"]?.uppercased() {
             switch pjrtDevice {
             case "TPU":
-                return .tpu
+                if isTPUAvailable() { return .tpu }
             case "GPU", "CUDA":
-                return .gpu
+                if isGPUAvailable() { return .gpu }
             case "CPU":
                 return .cpu
             default:

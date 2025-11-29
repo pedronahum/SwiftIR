@@ -633,8 +633,7 @@ jobs:
 
           **Cell 1** - Install Swift:
 
-              !curl -sL https://raw.githubusercontent.com/philipturner/swift-colab/refs/heads/main/install_swift_colab.sh | bash -s -- "11-28-a" &> /dev/null
-              # Select Runtime > Change runtime type > Swift (if available) or restart
+              !curl -sL https://raw.githubusercontent.com/pedronahum/swift-jupyter/main/install_swift_colab.sh | bash
 
           **Cell 2** - Download SDK and setup:
 
