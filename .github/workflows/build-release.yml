@@ -342,17 +342,21 @@ jobs:
         echo "Extracting package..."
         tar xzf SwiftIR-*-linux-x86_64.tar.gz
 
+        # Find the extracted directory (handles versioned names)
+        SWIFTIR_DIR=$(find . -maxdepth 1 -type d -name "SwiftIR-*" | head -1)
+        echo "Found SwiftIR directory: $SWIFTIR_DIR"
+
         echo ""
         echo "Package contents:"
-        ls -la SwiftIR-*/
+        ls -la "$SWIFTIR_DIR/"
 
         echo ""
         echo "Libraries:"
-        ls -la SwiftIR-*/lib/
+        ls -la "$SWIFTIR_DIR/lib/"
 
         echo ""
         echo "Setting up environment..."
-        cd SwiftIR-*
+        cd "$SWIFTIR_DIR"
         source ./setup.sh
 
         echo ""
