@@ -69,13 +69,17 @@ jobs:
 
       - name: Install Bazelisk
         run: |
-          # Ensure /usr/local/bin exists (may have been removed during cleanup)
-          sudo mkdir -p /usr/local/bin
-
-          # Use curl to download bazelisk
-          sudo curl -L -o /usr/local/bin/bazelisk \
+          # Download to /tmp first, then move (more reliable)
+          curl -L -o /tmp/bazelisk \
             https://github.com/bazelbuild/bazelisk/releases/download/v1.19.0/bazelisk-linux-amd64
+
+          # Ensure /usr/local/bin exists and move bazelisk there
+          sudo mkdir -p /usr/local/bin
+          sudo mv /tmp/bazelisk /usr/local/bin/bazelisk
           sudo chmod +x /usr/local/bin/bazelisk
+
+          # Verify installation
+          ls -la /usr/local/bin/bazelisk
           bazelisk version || echo "Bazelisk installed (version check may fail without a workspace)"
 
       - name: Install Swift Development Snapshot
