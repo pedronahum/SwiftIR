@@ -132,7 +132,7 @@ jobs:
         echo "version=$VERSION" >> $GITHUB_OUTPUT
         echo "Building version: $VERSION"
 
-    - name: Package Release
+    - name: Package Runtime Release
       run: |
         export PATH="$HOME/.local/bin:$PATH"
         VERSION=${{ steps.version.outputs.version }}
@@ -219,12 +219,108 @@ jobs:
 
         echo ""
         echo "========================================="
-        echo "Package created: ${PACKAGE_NAME}.tar.gz"
+        echo "Runtime package created: ${PACKAGE_NAME}.tar.gz"
         echo "========================================="
         ls -lh ${PACKAGE_NAME}.tar.gz
         echo ""
         echo "Contents:"
         tar -tzf ${PACKAGE_NAME}.tar.gz | head -30
+
+    - name: Package Development SDK
+      run: |
+        VERSION=${{ steps.version.outputs.version }}
+        SDK_NAME="SwiftIR-SDK-${VERSION}-linux-x86_64"
+
+        echo "Creating development SDK package..."
+        mkdir -p ${SDK_NAME}
+
+        # Copy the FULL swiftir-deps directory (headers, cmake configs, libraries)
+        echo "Copying full dependencies..."
+        cp -r /opt/swiftir-deps/* ${SDK_NAME}/
+
+        # Create setup script for SDK
+        cat > ${SDK_NAME}/setup-sdk.sh << 'SDKEOF'
+        #!/bin/bash
+        # SwiftIR SDK Environment Setup
+        # Source this file: source /path/to/SwiftIR-SDK/setup-sdk.sh
+
+        SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+        export SWIFTIR_DEPS_DIR="$SCRIPT_DIR"
+        export SWIFTIR_HOME="$SCRIPT_DIR"
+        export LD_LIBRARY_PATH="$SCRIPT_DIR/lib:$LD_LIBRARY_PATH"
+        export LIBRARY_PATH="$SCRIPT_DIR/lib:$LIBRARY_PATH"
+        export CPATH="$SCRIPT_DIR/include:$CPATH"
+        export PATH="$SCRIPT_DIR/bin:$PATH"
+
+        echo "SwiftIR SDK environment configured!"
+        echo "  SWIFTIR_DEPS_DIR=$SWIFTIR_DEPS_DIR"
+        echo "  LD_LIBRARY_PATH includes: $SCRIPT_DIR/lib"
+        echo ""
+        echo "You can now build SwiftIR with: swift build"
+        SDKEOF
+        chmod +x ${SDK_NAME}/setup-sdk.sh
+
+        # Create README for SDK
+        cat > ${SDK_NAME}/README-SDK.md << 'READMEEOF'
+        # SwiftIR Development SDK
+
+        This SDK contains everything needed to compile SwiftIR from source,
+        including pre-built LLVM/MLIR, StableHLO, and XLA dependencies.
+
+        ## Quick Start (Google Colab / Linux)
+
+        1. Extract and setup:
+
+            tar xzf SwiftIR-SDK-*-linux-x86_64.tar.gz
+            cd SwiftIR-SDK-*
+            source ./setup-sdk.sh
+
+        2. Clone and build SwiftIR:
+
+            git clone https://github.com/pedronahum/SwiftIR.git
+            cd SwiftIR
+            swift build
+
+        3. Run examples:
+
+            swift run RuntimeInfo
+            swift run PJRT_Add_Example
+
+        ## Contents
+
+        - lib/ - Pre-built libraries (LLVM, MLIR, PJRT plugins, etc.)
+        - include/ - Header files for compilation
+        - lib/cmake/ - CMake configuration files
+        - bin/ - LLVM/MLIR tools
+
+        ## Environment Variables
+
+        The setup-sdk.sh script sets:
+        - SWIFTIR_DEPS_DIR - Points to this SDK directory
+        - LD_LIBRARY_PATH - For runtime library loading
+        - LIBRARY_PATH - For compile-time linking
+        - CPATH - For header file discovery
+
+        ## Requirements
+
+        - Linux x86_64 (Ubuntu 22.04+ recommended)
+        - Swift 6.0+ (development snapshot recommended)
+        READMEEOF
+
+        # Create tarball
+        tar -czvf ${SDK_NAME}.tar.gz ${SDK_NAME}/
+
+        echo ""
+        echo "========================================="
+        echo "SDK package created: ${SDK_NAME}.tar.gz"
+        echo "========================================="
+        ls -lh ${SDK_NAME}.tar.gz
+        echo ""
+        echo "SDK Contents summary:"
+        echo "  Libraries: $(find ${SDK_NAME}/lib -name '*.so' -o -name '*.a' 2>/dev/null | wc -l) files"
+        echo "  Headers: $(find ${SDK_NAME}/include -name '*.h' 2>/dev/null | wc -l) files"
+        echo "  CMake configs: $(find ${SDK_NAME}/lib/cmake -name '*.cmake' 2>/dev/null | wc -l) files"
 
     - name: Create Package README
       run: |
@@ -297,18 +393,25 @@ jobs:
         rm ${PACKAGE_NAME}.tar.gz
         tar -czvf ${PACKAGE_NAME}.tar.gz ${PACKAGE_NAME}/
 
-    - name: Upload Build Artifact
+    - name: Upload Runtime Artifact
       uses: actions/upload-artifact@v4
       with:
         name: swiftir-linux-x86_64
-        path: SwiftIR-*-linux-x86_64.tar.gz
+        path: SwiftIR-${{ steps.version.outputs.version }}-linux-x86_64.tar.gz
+        retention-days: 14
+
+    - name: Upload SDK Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: swiftir-sdk-linux-x86_64
+        path: SwiftIR-SDK-${{ steps.version.outputs.version }}-linux-x86_64.tar.gz
         retention-days: 14
 
   # =============================================================
-  # Test the packaged release
+  # Test the runtime package
   # =============================================================
   test-package:
-    name: Test Package (Ubuntu)
+    name: Test Runtime Package (Ubuntu)
     needs: build-linux
     runs-on: ubuntu-24.04
 
@@ -343,7 +446,7 @@ jobs:
         tar xzf SwiftIR-*-linux-x86_64.tar.gz
 
         # Find the extracted directory (handles versioned names)
-        SWIFTIR_DIR=$(find . -maxdepth 1 -type d -name "SwiftIR-*" | head -1)
+        SWIFTIR_DIR=$(find . -maxdepth 1 -type d -name "SwiftIR-*" -not -name "SwiftIR-SDK-*" | head -1)
         echo "Found SwiftIR directory: $SWIFTIR_DIR"
 
         echo ""
@@ -369,11 +472,104 @@ jobs:
         fi
 
   # =============================================================
+  # Test the SDK package (can compile SwiftIR from source)
+  # =============================================================
+  test-sdk:
+    name: Test SDK Package (Ubuntu)
+    needs: build-linux
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Install System Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential cmake ninja-build git wget curl \
+          clang-18 lld-18 \
+          libc++-18-dev libc++abi-18-dev \
+          libicu-dev libssl-dev libxml2-dev \
+          libcurl4-openssl-dev libz-dev libzstd-dev \
+          libncurses-dev zlib1g-dev
+
+    - name: Install Swift
+      run: |
+        SWIFT_URL="https://download.swift.org/development/ubuntu2204/swift-DEVELOPMENT-SNAPSHOT-2025-11-03-a/swift-DEVELOPMENT-SNAPSHOT-2025-11-03-a-ubuntu22.04.tar.gz"
+
+        echo "Downloading Swift development snapshot..."
+        curl -L "$SWIFT_URL" -o /tmp/swift.tar.gz
+
+        echo "Extracting Swift..."
+        sudo mkdir -p /opt/swift
+        sudo tar xzf /tmp/swift.tar.gz -C /opt/swift --strip-components=1
+
+        echo "Setting up PATH..."
+        echo "/opt/swift/usr/bin" >> $GITHUB_PATH
+        export PATH="/opt/swift/usr/bin:$PATH"
+
+        swift --version
+
+    - name: Download SDK Artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: swiftir-sdk-linux-x86_64
+
+    - name: Extract and Setup SDK
+      run: |
+        echo "Extracting SDK package..."
+        tar xzf SwiftIR-SDK-*-linux-x86_64.tar.gz
+
+        # Find the extracted SDK directory
+        SDK_DIR=$(find . -maxdepth 1 -type d -name "SwiftIR-SDK-*" | head -1)
+        echo "Found SDK directory: $SDK_DIR"
+
+        echo ""
+        echo "SDK contents:"
+        ls -la "$SDK_DIR/"
+
+        echo ""
+        echo "SDK libraries count: $(find $SDK_DIR/lib -name '*.so' -o -name '*.a' 2>/dev/null | wc -l)"
+        echo "SDK headers count: $(find $SDK_DIR/include -name '*.h' 2>/dev/null | wc -l)"
+        echo "CMake configs: $(find $SDK_DIR/lib/cmake -name '*.cmake' 2>/dev/null | wc -l)"
+
+        # Move SDK to /opt for consistent paths
+        sudo mv "$SDK_DIR" /opt/swiftir-deps
+        echo "SDK installed to /opt/swiftir-deps"
+
+    - name: Build SwiftIR from Source
+      run: |
+        # Setup environment
+        export SWIFTIR_DEPS_DIR=/opt/swiftir-deps
+        export LD_LIBRARY_PATH=/opt/swiftir-deps/lib:$LD_LIBRARY_PATH
+        export LIBRARY_PATH=/opt/swiftir-deps/lib:$LIBRARY_PATH
+        export CPATH=/opt/swiftir-deps/include:$CPATH
+
+        echo "Building SwiftIR..."
+        swift build -c release
+
+        echo ""
+        echo "Build successful!"
+        ls -la .build/release/*.so 2>/dev/null || echo "No .so files (expected on some configs)"
+
+    - name: Run Example
+      run: |
+        export SWIFTIR_DEPS_DIR=/opt/swiftir-deps
+        export LD_LIBRARY_PATH=/opt/swiftir-deps/lib:$LD_LIBRARY_PATH
+
+        echo "Running RuntimeInfo example..."
+        swift run -c release RuntimeInfo 2>&1 | head -30 || true
+
+        echo ""
+        echo "SDK test complete!"
+
+  # =============================================================
   # Create GitHub Release
   # =============================================================
   release:
     name: Create Release
-    needs: [build-linux, test-package]
+    needs: [build-linux, test-package, test-sdk]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
 
@@ -392,14 +588,23 @@ jobs:
     - name: Prepare Release Assets
       run: |
         mkdir release-assets
+
+        # Copy runtime package
         cp artifacts/swiftir-linux-x86_64/*.tar.gz release-assets/
 
-        # Create a version-agnostic symlink name for "latest"
+        # Copy SDK package
+        cp artifacts/swiftir-sdk-linux-x86_64/*.tar.gz release-assets/
+
+        # Create version-agnostic names for "latest" downloads
         cd release-assets
-        for f in SwiftIR-*-linux-x86_64.tar.gz; do
-          cp "$f" SwiftIR-linux-x86_64.tar.gz
+        for f in SwiftIR-[0-9]*-linux-x86_64.tar.gz; do
+          [ -f "$f" ] && cp "$f" SwiftIR-linux-x86_64.tar.gz
+        done
+        for f in SwiftIR-SDK-*-linux-x86_64.tar.gz; do
+          [ -f "$f" ] && cp "$f" SwiftIR-SDK-linux-x86_64.tar.gz
         done
 
+        echo "Release assets:"
         ls -la
 
     - name: Create Release
@@ -414,52 +619,72 @@ jobs:
 
           Swift for Intermediate Representation - Hardware-accelerated differentiable computing.
 
-          ### Installation
+          ### Download Options
 
-          #### Google Colab (Recommended for TPU)
+          | Package | Description | Size |
+          |---------|-------------|------|
+          | `SwiftIR-linux-x86_64.tar.gz` | Runtime only (pre-built binaries) | ~400MB |
+          | `SwiftIR-SDK-linux-x86_64.tar.gz` | Full SDK (compile from source) | ~2GB |
 
-          Download and extract in a Python cell:
+          - **Runtime Package**: Use if you just want to run SwiftIR examples
+          - **SDK Package**: Use if you want to compile SwiftIR from source (e.g., in Colab)
 
-              !curl -L https://github.com/pedronahum/SwiftIR/releases/download/${{ github.ref_name }}/SwiftIR-linux-x86_64.tar.gz | tar xz -C /content
-              !mv /content/SwiftIR-* /content/SwiftIR
-              %env LD_LIBRARY_PATH=/content/SwiftIR/lib
-              %env SWIFTIR_HOME=/content/SwiftIR
+          ### Google Colab Setup (Compile from Source)
 
-          #### Local Linux Installation
+          **Cell 1** - Install Swift:
 
-              # Download
-              curl -LO https://github.com/pedronahum/SwiftIR/releases/download/${{ github.ref_name }}/SwiftIR-linux-x86_64.tar.gz
-              tar xzf SwiftIR-linux-x86_64.tar.gz
-              cd SwiftIR-*
+              !curl -sL https://raw.githubusercontent.com/philipturner/swift-colab/refs/heads/main/install_swift_colab.sh | bash -s -- "11-28-a" &> /dev/null
+              # Select Runtime > Change runtime type > Swift (if available) or restart
 
-              # Quick setup
-              source ./setup.sh
+          **Cell 2** - Download SDK and setup:
 
-              # Or system-wide install
-              sudo ./install.sh
+              !curl -L https://github.com/pedronahum/SwiftIR/releases/download/${{ github.ref_name }}/SwiftIR-SDK-linux-x86_64.tar.gz | tar xz -C /content
+              !mv /content/SwiftIR-SDK-* /opt/swiftir-deps
+              %env SWIFTIR_DEPS_DIR=/opt/swiftir-deps
+              %env LD_LIBRARY_PATH=/opt/swiftir-deps/lib
+              %env LIBRARY_PATH=/opt/swiftir-deps/lib
+              %env CPATH=/opt/swiftir-deps/include
 
-          ### What's Included
+          **Cell 3** - Clone and build:
 
-          - SwiftIR core libraries with automatic differentiation
-          - CPU PJRT plugin (bundled) - works out of the box
-          - Runtime detection for CPU/GPU/TPU
-          - Swift modules for development
+              !git clone https://github.com/pedronahum/SwiftIR.git /content/SwiftIR
+              !cd /content/SwiftIR && swift build
+
+          **Cell 4** - Run example:
+
+              !cd /content/SwiftIR && swift run RuntimeInfo
+
+          ### Local Linux Installation
+
+              # Download SDK
+              curl -LO https://github.com/pedronahum/SwiftIR/releases/download/${{ github.ref_name }}/SwiftIR-SDK-linux-x86_64.tar.gz
+              tar xzf SwiftIR-SDK-linux-x86_64.tar.gz
+              cd SwiftIR-SDK-*
+
+              # Setup environment
+              source ./setup-sdk.sh
+
+              # Clone and build SwiftIR
+              git clone https://github.com/pedronahum/SwiftIR.git
+              cd SwiftIR
+              swift build
+
+              # Run examples
+              swift run RuntimeInfo
+              swift run PJRT_Add_Example
+
+          ### What's Included in SDK
+
+          - Pre-built LLVM/MLIR libraries
+          - Pre-built StableHLO libraries
+          - Pre-built XLA/PJRT libraries
+          - CPU PJRT plugin (bundled)
+          - All headers and CMake configs
 
           ### Accelerator Support
 
           - CPU: Ready (plugin bundled)
           - GPU: Install jax[cuda12] for CUDA plugin
           - TPU: Ready on TPU VMs/Colab TPU
-
-          ### Quick Test
-
-              import SwiftIRRuntime
-
-              // Detect available accelerators
-              RuntimeDetector.printInfo()
-
-              // Use auto-detected accelerator
-              let accelerator = RuntimeDetector.detect()
-              print("Best accelerator: \(accelerator)")
 
           See the [full documentation](https://github.com/pedronahum/SwiftIR#readme) for more examples.
