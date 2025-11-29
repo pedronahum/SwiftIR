@@ -69,7 +69,10 @@ jobs:
 
       - name: Install Bazelisk
         run: |
-          # Use curl instead of wget (curl is more reliably available)
+          # Ensure /usr/local/bin exists (may have been removed during cleanup)
+          sudo mkdir -p /usr/local/bin
+
+          # Use curl to download bazelisk
           sudo curl -L -o /usr/local/bin/bazelisk \
             https://github.com/bazelbuild/bazelisk/releases/download/v1.19.0/bazelisk-linux-amd64
           sudo chmod +x /usr/local/bin/bazelisk
