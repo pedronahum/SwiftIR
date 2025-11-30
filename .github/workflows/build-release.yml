@@ -191,9 +191,11 @@ jobs:
         export SWIFTIR_HOME="$SCRIPT_DIR"
         export LD_LIBRARY_PATH="$SCRIPT_DIR/lib:$LD_LIBRARY_PATH"
         export LIBRARY_PATH="$SCRIPT_DIR/lib:$LIBRARY_PATH"
+        export SWIFTIR_MODULE_PATH="$SCRIPT_DIR/swift-modules"
 
         echo "SwiftIR environment configured!"
         echo "  SWIFTIR_HOME=$SWIFTIR_HOME"
+        echo "  SWIFTIR_MODULE_PATH=$SWIFTIR_MODULE_PATH"
         SETUPEOF
         chmod +x ${PACKAGE_NAME}/setup.sh
 
@@ -208,17 +210,19 @@ jobs:
         echo "Installing SwiftIR to ${PREFIX}..."
 
         # Create directories
-        sudo mkdir -p "${PREFIX}"/{lib,include,bin,share}
+        sudo mkdir -p "${PREFIX}"/{lib,include,bin,share,swift-modules}
 
         # Copy files
         sudo cp -r "${SCRIPT_DIR}/lib/"* "${PREFIX}/lib/"
         sudo cp -r "${SCRIPT_DIR}/include/"* "${PREFIX}/include/" 2>/dev/null || true
+        sudo cp -r "${SCRIPT_DIR}/swift-modules/"* "${PREFIX}/swift-modules/" 2>/dev/null || true
 
         # Create environment script
         sudo tee /etc/profile.d/swiftir.sh > /dev/null << ENVSCRIPT
         export SWIFTIR_HOME=${PREFIX}
         export LD_LIBRARY_PATH=${PREFIX}/lib:\$LD_LIBRARY_PATH
         export LIBRARY_PATH=${PREFIX}/lib:\$LIBRARY_PATH
+        export SWIFTIR_MODULE_PATH=${PREFIX}/swift-modules
         ENVSCRIPT
 
         # Update library cache
@@ -226,6 +230,10 @@ jobs:
 
         echo ""
         echo "Installation complete!"
+        echo "  SWIFTIR_HOME=${PREFIX}"
+        echo "  Libraries: ${PREFIX}/lib/"
+        echo "  Modules:   ${PREFIX}/swift-modules/"
+        echo ""
         echo "Run: source /etc/profile.d/swiftir.sh"
         echo "Or add to your shell profile for permanent setup."
         INSTALLEOF
