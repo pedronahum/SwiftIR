@@ -153,6 +153,7 @@ jobs:
         cp -v ${BUILD_DIR}/*.a ${PACKAGE_NAME}/lib/ 2>/dev/null || true
 
         # Copy Swift modules (they are files in $BUILD_DIR/Modules/)
+        # IMPORTANT: LLDB (used by swift-jupyter) requires both .swiftmodule AND .swiftdoc files
         echo "Copying Swift modules..."
         mkdir -p ${PACKAGE_NAME}/swift-modules
         for module in SwiftIR SwiftIRCore SwiftIRTypes SwiftIRDialects SwiftIRBuilders SwiftIRXLA SwiftIRStableHLO SwiftIRRuntime; do
@@ -161,6 +162,11 @@ jobs:
             echo "  ✅ Copied ${module}.swiftmodule"
           else
             echo "  ⚠️ Not found: ${module}.swiftmodule"
+          fi
+          # Also copy .swiftdoc (required by LLDB for module loading)
+          if [ -f "${BUILD_DIR}/Modules/${module}.swiftdoc" ]; then
+            cp -v "${BUILD_DIR}/Modules/${module}.swiftdoc" ${PACKAGE_NAME}/swift-modules/
+            echo "  ✅ Copied ${module}.swiftdoc"
           fi
         done
 

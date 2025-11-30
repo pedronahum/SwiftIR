@@ -421,12 +421,18 @@ jobs:
           BUILD_DIR=".build/x86_64-unknown-linux-gnu/release"
 
           # Copy all SwiftIR modules (they are files in $BUILD_DIR/Modules/)
+          # IMPORTANT: LLDB (used by swift-jupyter) requires both .swiftmodule AND .swiftdoc files
           for module in SwiftIR SwiftIRCore SwiftIRTypes SwiftIRDialects SwiftIRBuilders SwiftIRXLA SwiftIRStableHLO SwiftIRRuntime; do
             if [ -f "$BUILD_DIR/Modules/${module}.swiftmodule" ]; then
               cp "$BUILD_DIR/Modules/${module}.swiftmodule" /opt/swiftir-deps/swift-modules/
               echo "  ✅ Copied ${module}.swiftmodule"
             else
               echo "  ⚠️ Not found: ${module}.swiftmodule"
+            fi
+            # Also copy .swiftdoc (required by LLDB for module loading)
+            if [ -f "$BUILD_DIR/Modules/${module}.swiftdoc" ]; then
+              cp "$BUILD_DIR/Modules/${module}.swiftdoc" /opt/swiftir-deps/swift-modules/
+              echo "  ✅ Copied ${module}.swiftdoc"
             fi
           done
 
@@ -446,6 +452,17 @@ jobs:
           echo ""
           echo "Swift modules packaged:"
           ls -la /opt/swiftir-deps/swift-modules/ 2>/dev/null || echo "No modules found"
+
+          # ============================================================
+          # Copy SwiftIRRuntime source files for on-demand compilation
+          # This ensures compatibility with any Swift version in Colab
+          # ============================================================
+          echo ""
+          echo "Copying SwiftIRRuntime source files for Jupyter compatibility..."
+          mkdir -p /opt/swiftir-deps/swift-sources/SwiftIRRuntime
+          cp $GITHUB_WORKSPACE/Sources/SwiftIRRuntime/*.swift /opt/swiftir-deps/swift-sources/SwiftIRRuntime/
+          echo "  ✅ SwiftIRRuntime sources copied"
+          ls -la /opt/swiftir-deps/swift-sources/SwiftIRRuntime/
 
       # ============================================================
       # 8. Package and Upload Artifacts

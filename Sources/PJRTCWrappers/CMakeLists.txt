@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(PJRTProtoHelper CXX)
+project(PJRTProtoHelper C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -71,10 +71,35 @@ endif()
 # No external libraries needed - we manually encode protobuf format
 message(STATUS "PJRTProtoHelper: Using manual protobuf encoding (no external dependencies)")
 
+# Create shared library for PJRT Simple Wrapper (used by SwiftIRJupyter)
+add_library(PJRTSimpleWrapper SHARED
+    PJRTSimpleWrapper.c
+)
+
+# Set library output name and link dependencies
+if(APPLE)
+    set_target_properties(PJRTSimpleWrapper PROPERTIES
+        OUTPUT_NAME "PJRTSimpleWrapper"
+        MACOSX_RPATH ON
+        INSTALL_NAME_DIR "@rpath"
+    )
+else()
+    set_target_properties(PJRTSimpleWrapper PROPERTIES
+        OUTPUT_NAME "PJRTSimpleWrapper"
+        INSTALL_RPATH "$ORIGIN"
+        BUILD_WITH_INSTALL_RPATH TRUE
+    )
+endif()
+
+# PJRTSimpleWrapper needs PJRTProtoHelper
+target_link_libraries(PJRTSimpleWrapper PRIVATE PJRTProtoHelper)
+
 # Install to SwiftIR cmake/build/lib (same location as libSwiftIRMLIR)
-install(TARGETS PJRTProtoHelper
+install(TARGETS PJRTProtoHelper PJRTSimpleWrapper
     LIBRARY DESTINATION ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/build/lib
 )
 
 message(STATUS "PJRTProtoHelper Configuration:")
+message(STATUS "  Install destination: ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/build/lib")
+message(STATUS "PJRTSimpleWrapper Configuration:")
 message(STATUS "  Install destination: ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/build/lib")

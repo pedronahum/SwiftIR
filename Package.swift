@@ -4,39 +4,84 @@
 
 import PackageDescription
 import CompilerPluginSupport
+import Foundation
 
 // MARK: - Path Configuration
 
+// SDK mode: explicitly enabled via SWIFTIR_USE_SDK=1 (for Colab/deployed environments)
+// Local dev mode: default behavior, uses local build paths
+let swiftirDeps = ProcessInfo.processInfo.environment["SWIFTIR_DEPS"] ?? "/opt/swiftir-deps"
+let useSDK = ProcessInfo.processInfo.environment["SWIFTIR_USE_SDK"] == "1"
+
 // StableHLO/LLVM/MLIR paths
-let stablehloRoot = "/Users/pedro/programming/swift/stablehlo"
-let llvmBuildDir = "\(stablehloRoot)/llvm-build"
-let llvmProjectDir = "\(stablehloRoot)/llvm-project"
-let stablehloBuildDir = "\(stablehloRoot)/build"
+let stablehloRoot: String
+let llvmBuildDir: String
+let llvmProjectDir: String
+let stablehloBuildDir: String
 
 // SwiftIR build paths
-let swiftIRRoot = "/Users/pedro/programming/swift/SwiftIR"
-let cmakeBuildDir = "\(swiftIRRoot)/cmake/build"
+let swiftIRRoot: String
+let cmakeBuildDir: String
 
 // XLA/PJRT paths
-let xlaRoot = "/Users/pedro/programming/swift/xla"
-let xlaBaseliskBuildDir = "/Users/pedro/programming/swift/xla-bazelisk-build"
-let pjrtHeaderPath = "\(xlaBaseliskBuildDir)/607423a1c455c14997634f7cf9a59c45/execroot/xla/bazel-out/darwin_arm64-opt/bin/xla/pjrt/c"
+let xlaRoot: String
+let xlaBaseliskBuildDir: String
+let pjrtHeaderPath: String
 
-// Homebrew paths (system dependencies)
-let homebrewLibDir = "/opt/homebrew/lib"
+// System library paths
+let systemLibDir: String
+
+if useSDK {
+    // Use pre-built SDK (Colab, Linux CI, deployed environments)
+    stablehloRoot = swiftirDeps
+    llvmBuildDir = swiftirDeps
+    llvmProjectDir = swiftirDeps
+    stablehloBuildDir = swiftirDeps
+    swiftIRRoot = "."
+    cmakeBuildDir = swiftirDeps
+    xlaRoot = swiftirDeps
+    xlaBaseliskBuildDir = swiftirDeps
+    pjrtHeaderPath = "\(swiftirDeps)/include"
+    systemLibDir = "\(swiftirDeps)/lib"
+} else {
+    // Local development paths (macOS)
+    stablehloRoot = "/Users/pedro/programming/swift/stablehlo"
+    llvmBuildDir = "\(stablehloRoot)/llvm-build"
+    llvmProjectDir = "\(stablehloRoot)/llvm-project"
+    stablehloBuildDir = "\(stablehloRoot)/build"
+    swiftIRRoot = "/Users/pedro/programming/swift/SwiftIR"
+    cmakeBuildDir = "\(swiftIRRoot)/cmake/build"
+    xlaRoot = "/Users/pedro/programming/swift/xla"
+    xlaBaseliskBuildDir = "/Users/pedro/programming/swift/xla-bazelisk-build"
+    pjrtHeaderPath = "\(xlaBaseliskBuildDir)/607423a1c455c14997634f7cf9a59c45/execroot/xla/bazel-out/darwin_arm64-opt/bin/xla/pjrt/c"
+    systemLibDir = "/opt/homebrew/lib"  // Homebrew on macOS
+}
 
 // MARK: - Include Paths
 
-let mlirIncludePaths = [
-    "-I", "\(llvmBuildDir)/include",
-    "-I", "\(llvmBuildDir)/tools/mlir/include",
-    "-I", "\(llvmProjectDir)/mlir/include",
-]
+let mlirIncludePaths: [String]
+let stablehloIncludePaths: [String]
 
-let stablehloIncludePaths = [
-    "-I", "\(stablehloRoot)/stablehlo",
-    "-I", "\(stablehloBuildDir)/stablehlo",
-]
+if useSDK {
+    // SDK mode: all headers are flat in include/
+    mlirIncludePaths = [
+        "-I", "\(swiftirDeps)/include",
+    ]
+    stablehloIncludePaths = [
+        "-I", "\(swiftirDeps)/include/stablehlo",
+    ]
+} else {
+    // Local dev mode: headers in build tree structure
+    mlirIncludePaths = [
+        "-I", "\(llvmBuildDir)/include",
+        "-I", "\(llvmBuildDir)/tools/mlir/include",
+        "-I", "\(llvmProjectDir)/mlir/include",
+    ]
+    stablehloIncludePaths = [
+        "-I", "\(stablehloRoot)/stablehlo",
+        "-I", "\(stablehloBuildDir)/stablehlo",
+    ]
+}
 
 let swiftIRIncludePaths = [
     "-I", "Sources/SwiftIRCore/include",
@@ -52,18 +97,27 @@ let pjrtIncludePaths = [
 let mlirLinkerFlags = [
     "-L\(cmakeBuildDir)/lib",
     "-lSwiftIRMLIR",
-    "-L\(homebrewLibDir)",
+    "-L\(systemLibDir)",
     "-lzstd",
     "-lz",
     "-lcurses",
 ]
 
-let pjrtLinkerFlags = [
-    "-Lcmake/build/lib",
-    "-lPJRTProtoHelper",
-    "-Xlinker", "-rpath", "-Xlinker", "@loader_path/../lib",
-    "-Xlinker", "-rpath", "-Xlinker", "cmake/build/lib",
-]
+let pjrtLinkerFlags: [String]
+if useSDK {
+    pjrtLinkerFlags = [
+        "-L\(systemLibDir)",
+        "-lPJRTProtoHelper",
+        "-Xlinker", "-rpath", "-Xlinker", systemLibDir,
+    ]
+} else {
+    pjrtLinkerFlags = [
+        "-Lcmake/build/lib",
+        "-lPJRTProtoHelper",
+        "-Xlinker", "-rpath", "-Xlinker", "@loader_path/../lib",
+        "-Xlinker", "-rpath", "-Xlinker", "cmake/build/lib",
+    ]
+}
 
 // MARK: - Combined Settings (for targets that need multiple includes)
 
@@ -115,6 +169,17 @@ let package = Package(
             name: "SwiftIRRuntime",
             targets: ["SwiftIRRuntime"]
         ),
+        // Dynamic library for Jupyter/LLDB REPL usage
+        .library(
+            name: "SwiftIRRuntimeDynamic",
+            type: .dynamic,
+            targets: ["SwiftIRRuntime"]
+        ),
+        // Pure Swift Jupyter/Colab integration (no C++ interop)
+        .library(
+            name: "SwiftIRJupyter",
+            targets: ["SwiftIRJupyter"]
+        ),
         // Examples
         .executable(
             name: "SimpleNN",
@@ -147,6 +212,30 @@ let package = Package(
         .executable(
             name: "BuildingSimulation_StandardSwift",
             targets: ["BuildingSimulation_StandardSwift"]
+        ),
+        .executable(
+            name: "JupyterTest",
+            targets: ["JupyterTest"]
+        ),
+        .executable(
+            name: "JupyterComprehensiveTest",
+            targets: ["JupyterComprehensiveTest"]
+        ),
+        .executable(
+            name: "JupyterBuildingSimulationTest",
+            targets: ["JupyterBuildingSimulationTest"]
+        ),
+        .executable(
+            name: "JupyterHighLevelTest",
+            targets: ["JupyterHighLevelTest"]
+        ),
+        .executable(
+            name: "JupyterBuildingSimulationFull",
+            targets: ["JupyterBuildingSimulationFull"]
+        ),
+        .executable(
+            name: "JupyterFeatureParityTest",
+            targets: ["JupyterFeatureParityTest"]
         ),
     ],
     dependencies: [
@@ -256,7 +345,9 @@ let package = Package(
                 "SwiftIRTypes",
                 "SwiftIRDialects",
                 "SwiftIRBuilders",
-                "SwiftIRMacros"
+                "SwiftIRMacros",
+                "SwiftIRXLA",
+                "SwiftIRStableHLO"
             ],
             path: "Sources/SwiftIR",
             exclude: ["README.md"],
@@ -309,6 +400,16 @@ let package = Package(
             name: "SwiftIRRuntime",
             dependencies: [],
             path: "Sources/SwiftIRRuntime"
+        ),
+
+        // MARK: - Pure Swift Jupyter/Colab Integration
+
+        // Uses dlopen/dlsym to load native libraries - no C++ interop required
+        // Works in LLDB REPL (Jupyter/Colab) where C++ interop is not supported
+        .target(
+            name: "SwiftIRJupyter",
+            dependencies: [],
+            path: "Sources/SwiftIRJupyter"
         ),
 
         // SPIR-V for Graphics/Compute
@@ -606,6 +707,54 @@ let package = Package(
             path: "Examples",
             exclude: ["README.md"],
             sources: ["RuntimeInfo.swift"]
+        ),
+
+        .executableTarget(
+            name: "JupyterTest",
+            dependencies: ["SwiftIRJupyter"],
+            path: "Examples",
+            exclude: ["README.md"],
+            sources: ["JupyterTest.swift"]
+        ),
+
+        .executableTarget(
+            name: "JupyterComprehensiveTest",
+            dependencies: ["SwiftIRJupyter"],
+            path: "Examples",
+            exclude: ["README.md"],
+            sources: ["JupyterComprehensiveTest.swift"]
+        ),
+
+        .executableTarget(
+            name: "JupyterBuildingSimulationTest",
+            dependencies: ["SwiftIRJupyter"],
+            path: "Examples",
+            exclude: ["README.md"],
+            sources: ["JupyterBuildingSimulationTest.swift"]
+        ),
+
+        .executableTarget(
+            name: "JupyterHighLevelTest",
+            dependencies: ["SwiftIRJupyter"],
+            path: "Examples",
+            exclude: ["README.md"],
+            sources: ["JupyterHighLevelTest.swift"]
+        ),
+
+        .executableTarget(
+            name: "JupyterBuildingSimulationFull",
+            dependencies: ["SwiftIRJupyter"],
+            path: "Examples",
+            exclude: ["README.md"],
+            sources: ["JupyterBuildingSimulationFull.swift"]
+        ),
+
+        .executableTarget(
+            name: "JupyterFeatureParityTest",
+            dependencies: ["SwiftIRJupyter"],
+            path: "Examples",
+            exclude: ["README.md"],
+            sources: ["JupyterFeatureParityTest.swift"]
         ),
 
         .executableTarget(
