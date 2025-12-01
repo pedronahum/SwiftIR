@@ -288,16 +288,16 @@ print("-" * 60)
 JTracerGraphBuilder.shared.reset()
 
 let sliceTensor = JTracer(value: 1.0, shape: JTensorShape([4, 6]), dtype: .float32)
-let sliced = sliceTensor.slice(starts: [0, 0], limits: [2, 3], strides: [1, 1])
-test("slice() shape", sliced.shape.dimensions == [2, 3])
+let slicedTensor = sliceTensor.slice(starts: [0, 0], limits: [2, 3], strides: [1, 1])
+test("slice() shape", slicedTensor.shape.dimensions.compactMap { $0 } == [2, 3])
 
 let cat1 = JTracer(value: 1.0, shape: JTensorShape([2, 3]), dtype: .float32)
 let cat2 = JTracer(value: 2.0, shape: JTensorShape([2, 3]), dtype: .float32)
 let concatenated = JTracer.concatenate([cat1, cat2], axis: 0)
-test("concatenate(axis=0)", concatenated.shape.dimensions == [4, 3])
+test("concatenate(axis=0)", concatenated.shape.dimensions.compactMap { $0 } == [4, 3])
 
 let concatAxis1 = JTracer.concatenate([cat1, cat2], axis: 1)
-test("concatenate(axis=1)", concatAxis1.shape.dimensions == [2, 6])
+test("concatenate(axis=1)", concatAxis1.shape.dimensions.compactMap { $0 } == [2, 6])
 
 print()
 
@@ -479,6 +479,526 @@ do {
 
 print()
 
+// MARK: - Test 11: Scan Operations
+
+print("-" * 60)
+print("TEST 11: Scan Operations (JAX-like)")
+print("-" * 60)
+
+JTracerGraphBuilder.shared.reset()
+
+// Test jScan basic API
+func testScanStep(carry: JTracer, input: JTracer) -> (JTracer, JTracer) {
+    let newCarry = carry + input
+    return (newCarry, newCarry)
+}
+
+let scanInputs = JTracer(value: 1.0, shape: JTensorShape([5]), dtype: .float32)
+let scanInit = JTracer(value: 0.0, shape: .scalar, dtype: .float32)
+
+// Test that jScan compiles without error (shape checking)
+let (scanFinal, scanOutputs) = jScan(testScanStep, initCarry: scanInit, xs: scanInputs)
+test("jScan returns final carry", scanFinal.shape == .scalar)
+test("jScan returns outputs with sequence shape", scanOutputs.shape.dimensions[0] == 5)
+
+// Test jCumsum
+JTracerGraphBuilder.shared.reset()
+let cumsumInput = JTracer(value: 1.0, shape: JTensorShape([4]), dtype: .float32)
+let cumsumResult = jCumsum(cumsumInput)
+test("jCumsum shape", cumsumResult.shape.dimensions[0] == 4)
+
+// Test jCumprod
+JTracerGraphBuilder.shared.reset()
+let cumprodInput = JTracer(value: 2.0, shape: JTensorShape([3]), dtype: .float32)
+let cumprodResult = jCumprod(cumprodInput)
+test("jCumprod shape", cumprodResult.shape.dimensions[0] == 3)
+
+// Test jScanSimple
+JTracerGraphBuilder.shared.reset()
+func simpleStep(state: JTracer, input: JTracer) -> JTracer {
+    return state + input
+}
+let (simpleFinal, simpleOutputs) = jScanSimple(simpleStep, initState: scanInit, xs: scanInputs)
+test("jScanSimple returns final state", simpleFinal.shape == .scalar)
+test("jScanSimple returns all states", simpleOutputs.shape.dimensions[0] == 5)
+
+// Test reverse scan
+JTracerGraphBuilder.shared.reset()
+let (reverseFinal, reverseOutputs) = jScan(testScanStep, initCarry: scanInit, xs: scanInputs, reverse: true)
+test("jScan reverse mode", reverseFinal.shape == .scalar)
+test("jScan reverse outputs shape", reverseOutputs.shape.dimensions[0] == 5)
+
+// Test dynamic slice helper
+JTracerGraphBuilder.shared.reset()
+let sliceInput = JTracer(value: 1.0, shape: JTensorShape([10, 3]), dtype: .float32)
+let sliceIndex = JTracer(value: 2.0, shape: .scalar, dtype: .float32)
+let dynamicSliced = jDynamicSliceAt(sliceInput, index: sliceIndex, featureShape: JTensorShape([3]))
+test("jDynamicSliceAt returns correct shape", dynamicSliced.shape.dimensions.compactMap { $0 } == [3])
+
+// Test dynamic update slice helper
+JTracerGraphBuilder.shared.reset()
+let updateOperand = JTracer(value: 0.0, shape: JTensorShape([10, 3]), dtype: .float32)
+let updateValue = JTracer(value: 1.0, shape: JTensorShape([3]), dtype: .float32)
+let updateIndex = JTracer(value: 5.0, shape: .scalar, dtype: .float32)
+let updated = jDynamicUpdateSliceAt(updateOperand, value: updateValue, index: updateIndex, outputShape: JTensorShape([3]))
+test("jDynamicUpdateSliceAt preserves shape", updated.shape.dimensions.compactMap { $0 } == [10, 3])
+
+print()
+
+// MARK: - Test 12: Conditional Operations (cond/select)
+
+print("TEST 12: Conditional Operations (jSelect, jCond, jWhere, jClamp)")
+print("-" * 60)
+
+// Test jSelect
+JTracerGraphBuilder.shared.reset()
+let selectCond = JTracer(value: 1.0, shape: JTensorShape([3]), dtype: .bool)  // Simulates boolean
+let selectTrue = JTracer(value: 10.0, shape: JTensorShape([3]), dtype: .float32)
+let selectFalse = JTracer(value: 0.0, shape: JTensorShape([3]), dtype: .float32)
+let selectResult = jSelect(selectCond, onTrue: selectTrue, onFalse: selectFalse)
+test("jSelect returns correct shape", selectResult.shape == JTensorShape([3]))
+test("jSelect returns correct dtype", selectResult.dtype == .float32)
+
+// Test jCond (scalar conditional)
+JTracerGraphBuilder.shared.reset()
+let condPredicate = JTracer(value: 1.0, shape: .scalar, dtype: .bool)
+let condX = JTracer(value: 5.0, shape: JTensorShape([2, 3]), dtype: .float32)
+let condResult = jCond(condPredicate, onTrue: { condX * JTracer(value: 2.0, shape: JTensorShape([2, 3]), dtype: .float32) }, onFalse: { condX })
+test("jCond returns correct shape", condResult.shape == JTensorShape([2, 3]))
+
+// Test jCondWith (conditional with operand)
+JTracerGraphBuilder.shared.reset()
+let condWithPred = JTracer(value: 0.0, shape: .scalar, dtype: .bool)
+let condWithX = JTracer(value: 3.0, shape: JTensorShape([4]), dtype: .float32)
+let condWithResult = jCondWith(condWithPred, operand: condWithX, onTrue: { x in x + x }, onFalse: { x in x })
+test("jCondWith returns correct shape", condWithResult.shape == JTensorShape([4]))
+
+// Test jWhere (NumPy-style alias)
+JTracerGraphBuilder.shared.reset()
+let whereMask = JTracer(value: 1.0, shape: JTensorShape([5]), dtype: .bool)
+let whereX = JTracer(value: 1.0, shape: JTensorShape([5]), dtype: .float32)
+let whereY = JTracer(value: 0.0, shape: JTensorShape([5]), dtype: .float32)
+let whereResult = jWhere(whereMask, whereX, whereY)
+test("jWhere returns correct shape", whereResult.shape == JTensorShape([5]))
+
+// Test jClamp
+JTracerGraphBuilder.shared.reset()
+let clampX = JTracer(value: 5.0, shape: JTensorShape([3, 4]), dtype: .float32)
+let jClampResult = jClamp(clampX, min: 0.0, max: 1.0)
+test("jClamp returns correct shape", jClampResult.shape == JTensorShape([3, 4]))
+test("jClamp preserves dtype", jClampResult.dtype == .float32)
+
+// Test comparison functions
+JTracerGraphBuilder.shared.reset()
+let cmpA = JTracer(value: 2.0, shape: JTensorShape([3]), dtype: .float32)
+let cmpB = JTracer(value: 3.0, shape: JTensorShape([3]), dtype: .float32)
+
+let jGtResult = jGreater(cmpA, cmpB)
+test("jGreater returns bool dtype", jGtResult.dtype == .bool)
+test("jGreater returns correct shape", jGtResult.shape == JTensorShape([3]))
+
+let jGeResult = jGreaterEqual(cmpA, cmpB)
+test("jGreaterEqual returns bool dtype", jGeResult.dtype == .bool)
+
+let jLtResult = jLess(cmpA, cmpB)
+test("jLess returns bool dtype", jLtResult.dtype == .bool)
+
+let jLeResult = jLessEqual(cmpA, cmpB)
+test("jLessEqual returns bool dtype", jLeResult.dtype == .bool)
+
+let jEqResult = jEqual(cmpA, cmpB)
+test("jEqual returns bool dtype", jEqResult.dtype == .bool)
+
+let jNeResult = jNotEqual(cmpA, cmpB)
+test("jNotEqual returns bool dtype", jNeResult.dtype == .bool)
+
+print()
+
+// MARK: - Test 13: Vmap Operations (Automatic Vectorization)
+
+print("TEST 13: Vmap Operations (jVmap, jVmap2, jVmap3)")
+print("-" * 60)
+
+// Test basic jVmap - single input
+JTracerGraphBuilder.shared.reset()
+let vmapInput = JTracer(value: 1.0, shape: JTensorShape([8, 64]), dtype: .float32)  // [batch, features]
+let vmappedFn = jVmap({ x in x.relu() })
+let vmapResult = vmappedFn(vmapInput)
+test("jVmap single input shape preserved", vmapResult.shape == JTensorShape([8, 64]))
+
+// Test jVmap with axis specification
+JTracerGraphBuilder.shared.reset()
+let vmapInput2 = JTracer(value: 1.0, shape: JTensorShape([16, 32]), dtype: .float32)
+let vmappedFn2 = jVmap({ x in x.tanh() }, inAxes: JVmapAxes(0))
+let vmapResult2 = vmappedFn2(vmapInput2)
+test("jVmap with inAxes shape", vmapResult2.shape == JTensorShape([16, 32]))
+
+// Test jVmap2 - two inputs, both batched
+JTracerGraphBuilder.shared.reset()
+let vmap2A = JTracer(value: 1.0, shape: JTensorShape([4, 16]), dtype: .float32)
+let vmap2B = JTracer(value: 2.0, shape: JTensorShape([4, 16]), dtype: .float32)
+let vmapped2Fn = jVmap2({ a, b in a + b }, inAxes: JVmapAxes(0, 0))
+let vmap2Result = vmapped2Fn(vmap2A, vmap2B)
+test("jVmap2 both batched shape", vmap2Result.shape == JTensorShape([4, 16]))
+
+// Test jVmap2 - one input batched, one broadcast
+JTracerGraphBuilder.shared.reset()
+let vmap2X = JTracer(value: 1.0, shape: JTensorShape([8, 32]), dtype: .float32)  // [batch, features]
+let vmap2W = JTracer(value: 0.5, shape: JTensorShape([32]), dtype: .float32)  // [features] - will be broadcast
+let vmapped2BroadcastFn = jVmap2({ x, w in x * w }, inAxes: JVmapAxes(0, nil))
+let vmap2BroadcastResult = vmapped2BroadcastFn(vmap2X, vmap2W)
+test("jVmap2 with broadcast shape", vmap2BroadcastResult.shape.dimensions[0] == 8)
+
+// Test jVmap3 - three inputs (MLP-like pattern)
+JTracerGraphBuilder.shared.reset()
+let vmap3X = JTracer(value: 1.0, shape: JTensorShape([4, 10]), dtype: .float32)  // [batch, input]
+let vmap3W1 = JTracer(value: 0.1, shape: JTensorShape([10, 20]), dtype: .float32)  // [input, hidden]
+let vmap3W2 = JTracer(value: 0.1, shape: JTensorShape([20, 5]), dtype: .float32)  // [hidden, output]
+// Note: jVmap3 broadcasts W1 and W2 across batch
+let vmapped3Fn = jVmap3({ x, w1, w2 in
+    let h = x.matmul(w1).relu()
+    return h.matmul(w2)
+}, inAxes: JVmapAxes(0, nil, nil))
+let vmap3Result = vmapped3Fn(vmap3X, vmap3W1, vmap3W2)
+test("jVmap3 MLP-like pattern batch dim", vmap3Result.shape.dimensions[0] == 4)
+test("jVmap3 MLP-like pattern output dim", vmap3Result.shape.dimensions[1] == 5)
+
+// Test jMoveAxis
+JTracerGraphBuilder.shared.reset()
+let moveAxisInput = JTracer(value: 1.0, shape: JTensorShape([2, 3, 4]), dtype: .float32)
+let movedAxis = jMoveAxis(moveAxisInput, from: 0, to: 2)
+test("jMoveAxis shape transformation", movedAxis.shape.dimensions.compactMap { $0 } == [3, 4, 2])
+
+// Test jBroadcastBatch
+JTracerGraphBuilder.shared.reset()
+let broadcastInput = JTracer(value: 1.0, shape: JTensorShape([32, 64]), dtype: .float32)
+let broadcastResult = jBroadcastBatch(broadcastInput, batchSize: 8, batchAxis: 0)
+test("jBroadcastBatch adds batch dim", broadcastResult.shape.dimensions.compactMap { $0 } == [8, 32, 64])
+
+// Test jBatchedMatmul - 3D @ 2D
+JTracerGraphBuilder.shared.reset()
+let batchedA = JTracer(value: 1.0, shape: JTensorShape([4, 8, 16]), dtype: .float32)  // [batch, m, k]
+let batchedB = JTracer(value: 1.0, shape: JTensorShape([16, 32]), dtype: .float32)  // [k, n]
+let batchedMatmulResult = jBatchedMatmul(batchedA, batchedB)
+test("jBatchedMatmul 3D@2D shape", batchedMatmulResult.shape.dimensions.compactMap { $0 } == [4, 8, 32])
+
+// Test jBatchedMatmul - 3D @ 3D (both batched)
+JTracerGraphBuilder.shared.reset()
+let batchedA2 = JTracer(value: 1.0, shape: JTensorShape([4, 8, 16]), dtype: .float32)  // [batch, m, k]
+let batchedB2 = JTracer(value: 1.0, shape: JTensorShape([4, 16, 32]), dtype: .float32)  // [batch, k, n]
+let batchedMatmulResult2 = jBatchedMatmul(batchedA2, batchedB2)
+test("jBatchedMatmul 3D@3D shape", batchedMatmulResult2.shape.dimensions.compactMap { $0 } == [4, 8, 32])
+
+// Test JVmapAxes expressibility
+let axes1: JVmapAxes = 0
+test("JVmapAxes integer literal", axes1.axes[0] == 0)
+let axes2: JVmapAxes = nil
+test("JVmapAxes nil literal", axes2.axes[0] == nil)
+let axes3: JVmapAxes = [0, nil, 1]
+test("JVmapAxes array literal count", axes3.axes.count == 3)
+
+print()
+
+// MARK: - Test 14: JTree Operations (jTreeMap, jTreeZipWith, jTreeReduce)
+
+print("-" * 60)
+print("TEST 14: JTree Operations (jTreeMap, jTreeZipWith, jTreeReduce)")
+print("-" * 60)
+
+// Test JTracer base conformance to JTree
+JTracerGraphBuilder.shared.reset()
+let treeLeaf = JTracer(value: 1.0, shape: JTensorShape([4, 8]), dtype: .float32)
+let flattenedLeaf = treeLeaf.flatten()
+test("JTracer flatten returns single element", flattenedLeaf.count == 1)
+
+let unflattenedLeaf = JTracer.unflatten(flattenedLeaf)
+test("JTracer unflatten shape matches", unflattenedLeaf.shape.dimensions.compactMap { $0 } == [4, 8])
+
+test("JTracer treeStructure is leaf", JTracer.treeStructure.leafCount == 1)
+
+// Test Array<JTracer> conformance
+JTracerGraphBuilder.shared.reset()
+let treeArray = [
+    JTracer(value: 1.0, shape: JTensorShape([2, 3]), dtype: .float32),
+    JTracer(value: 2.0, shape: JTensorShape([2, 3]), dtype: .float32),
+    JTracer(value: 3.0, shape: JTensorShape([2, 3]), dtype: .float32)
+]
+let flattenedArray = treeArray.flatten()
+test("Array<JTracer> flatten count", flattenedArray.count == 3)
+
+let unflattenedArray = [JTracer].unflatten(flattenedArray)
+test("Array<JTracer> unflatten count", unflattenedArray.count == 3)
+
+// Test JTuple2 conformance
+JTracerGraphBuilder.shared.reset()
+let tuple2 = JTuple2(
+    JTracer(value: 1.0, shape: JTensorShape([4, 8]), dtype: .float32),
+    JTracer(value: 2.0, shape: JTensorShape([8, 16]), dtype: .float32)
+)
+let flattenedTuple2 = tuple2.flatten()
+test("JTuple2 flatten count", flattenedTuple2.count == 2)
+test("JTuple2 treeStructure leafCount", JTuple2<JTracer, JTracer>.treeStructure.leafCount == 2)
+
+let unflattenedTuple2 = JTuple2<JTracer, JTracer>.unflatten(flattenedTuple2)
+test("JTuple2 unflatten first shape", unflattenedTuple2.t0.shape.dimensions.compactMap { $0 } == [4, 8])
+test("JTuple2 unflatten second shape", unflattenedTuple2.t1.shape.dimensions.compactMap { $0 } == [8, 16])
+
+// Test JTuple3 conformance
+JTracerGraphBuilder.shared.reset()
+let tuple3 = JTuple3(
+    JTracer(value: 1.0, shape: JTensorShape([10, 20]), dtype: .float32),
+    JTracer(value: 2.0, shape: JTensorShape([20]), dtype: .float32),
+    JTracer(value: 3.0, shape: JTensorShape([20, 10]), dtype: .float32)
+)
+let flattenedTuple3 = tuple3.flatten()
+test("JTuple3 flatten count", flattenedTuple3.count == 3)
+test("JTuple3 treeStructure leafCount", JTuple3<JTracer, JTracer, JTracer>.treeStructure.leafCount == 3)
+
+// Test JTuple4 conformance
+JTracerGraphBuilder.shared.reset()
+let tuple4 = JTuple4(
+    JTracer(value: 1.0, shape: JTensorShape([4, 8]), dtype: .float32),
+    JTracer(value: 2.0, shape: JTensorShape([8]), dtype: .float32),
+    JTracer(value: 3.0, shape: JTensorShape([8, 16]), dtype: .float32),
+    JTracer(value: 4.0, shape: JTensorShape([16]), dtype: .float32)
+)
+let flattenedTuple4 = tuple4.flatten()
+test("JTuple4 flatten count", flattenedTuple4.count == 4)
+test("JTuple4 treeStructure leafCount", JTuple4<JTracer, JTracer, JTracer, JTracer>.treeStructure.leafCount == 4)
+
+// Test jTreeMap - scale all parameters
+JTracerGraphBuilder.shared.reset()
+let mapInput = JTuple2(
+    JTracer(value: 1.0, shape: JTensorShape([4, 8]), dtype: .float32),
+    JTracer(value: 2.0, shape: JTensorShape([8, 16]), dtype: .float32)
+)
+let scaled = jTreeMap(mapInput) { leaf in leaf * JTracer(value: 2.0, shape: leaf.shape, dtype: leaf.dtype) }
+test("jTreeMap preserves structure", scaled.flatten().count == 2)
+test("jTreeMap first shape unchanged", scaled.t0.shape.dimensions.compactMap { $0 } == [4, 8])
+test("jTreeMap second shape unchanged", scaled.t1.shape.dimensions.compactMap { $0 } == [8, 16])
+
+// Test jTreeZipWith - SGD-like update
+JTracerGraphBuilder.shared.reset()
+let zipParams = JTuple2(
+    JTracer(value: 1.0, shape: JTensorShape([10, 20]), dtype: .float32),
+    JTracer(value: 0.5, shape: JTensorShape([20]), dtype: .float32)
+)
+let zipGrads = JTuple2(
+    JTracer(value: 0.1, shape: JTensorShape([10, 20]), dtype: .float32),
+    JTracer(value: 0.05, shape: JTensorShape([20]), dtype: .float32)
+)
+let zipUpdated: JTuple2<JTracer, JTracer> = jTreeZipWith(zipParams, zipGrads) { p, g in p - g }
+test("jTreeZipWith preserves structure", zipUpdated.flatten().count == 2)
+test("jTreeZipWith first shape", zipUpdated.t0.shape.dimensions.compactMap { $0 } == [10, 20])
+test("jTreeZipWith second shape", zipUpdated.t1.shape.dimensions.compactMap { $0 } == [20])
+
+// Test jTreeZipWith3 - Adam-like update pattern
+JTracerGraphBuilder.shared.reset()
+let adamParams = JTuple2(
+    JTracer(value: 1.0, shape: JTensorShape([4, 8]), dtype: .float32),
+    JTracer(value: 0.5, shape: JTensorShape([8]), dtype: .float32)
+)
+let adamM = JTuple2(
+    JTracer(value: 0.1, shape: JTensorShape([4, 8]), dtype: .float32),
+    JTracer(value: 0.05, shape: JTensorShape([8]), dtype: .float32)
+)
+let adamV = JTuple2(
+    JTracer(value: 0.01, shape: JTensorShape([4, 8]), dtype: .float32),
+    JTracer(value: 0.005, shape: JTensorShape([8]), dtype: .float32)
+)
+let adamUpdated = jTreeZipWith3(adamParams, adamM, adamV) { p, m, v in p - m }
+test("jTreeZipWith3 preserves structure", adamUpdated.flatten().count == 2)
+
+// Test jTreeReduce - sum all parameters (L2 norm style)
+JTracerGraphBuilder.shared.reset()
+let reduceInput = JTuple2(
+    JTracer(value: 1.0, shape: JTensorShape([4, 8]), dtype: .float32),
+    JTracer(value: 2.0, shape: JTensorShape([8, 16]), dtype: .float32)
+)
+let initial = JTracer(value: 0.0, shape: JTensorShape([1]), dtype: .float32)
+let reduced = jTreeReduce(reduceInput, initial) { acc, leaf in acc + leaf.sum() }
+test("jTreeReduce returns scalar-like", reduced.shape.dimensions.compactMap { $0 }.count <= 1)
+
+// Test jTreeLeafCount
+JTracerGraphBuilder.shared.reset()
+let countInput = JTuple3(
+    JTracer(value: 1.0, shape: JTensorShape([4, 8]), dtype: .float32),
+    JTracer(value: 2.0, shape: JTensorShape([8]), dtype: .float32),
+    JTracer(value: 3.0, shape: JTensorShape([8, 16]), dtype: .float32)
+)
+test("jTreeLeafCount", jTreeLeafCount(countInput) == 3)
+
+// Test jTreeShapes
+JTracerGraphBuilder.shared.reset()
+let shapesInput = JTuple2(
+    JTracer(value: 1.0, shape: JTensorShape([10, 20]), dtype: .float32),
+    JTracer(value: 2.0, shape: JTensorShape([20, 30]), dtype: .float32)
+)
+let shapes = jTreeShapes(shapesInput)
+test("jTreeShapes count", shapes.count == 2)
+test("jTreeShapes first", shapes[0].dimensions.compactMap { $0 } == [10, 20])
+test("jTreeShapes second", shapes[1].dimensions.compactMap { $0 } == [20, 30])
+
+// Test jTreeZerosLike
+JTracerGraphBuilder.shared.reset()
+let zerosInput = JTuple2(
+    JTracer(value: 5.0, shape: JTensorShape([4, 8]), dtype: .float32),
+    JTracer(value: 10.0, shape: JTensorShape([8, 16]), dtype: .float32)
+)
+let zeros = jTreeZerosLike(zerosInput)
+test("jTreeZerosLike structure", zeros.flatten().count == 2)
+test("jTreeZerosLike first shape", zeros.t0.shape.dimensions.compactMap { $0 } == [4, 8])
+test("jTreeZerosLike second shape", zeros.t1.shape.dimensions.compactMap { $0 } == [8, 16])
+
+// Test jTreeOnesLike
+JTracerGraphBuilder.shared.reset()
+let onesInput = JTuple2(
+    JTracer(value: 0.0, shape: JTensorShape([3, 5]), dtype: .float32),
+    JTracer(value: 0.0, shape: JTensorShape([5, 7]), dtype: .float32)
+)
+let ones = jTreeOnesLike(onesInput)
+test("jTreeOnesLike structure", ones.flatten().count == 2)
+
+// Test jTreeFullLike
+JTracerGraphBuilder.shared.reset()
+let fullInput = JTuple2(
+    JTracer(value: 0.0, shape: JTensorShape([2, 4]), dtype: .float32),
+    JTracer(value: 0.0, shape: JTensorShape([4, 6]), dtype: .float32)
+)
+let full = jTreeFullLike(fullInput, value: 0.5)
+test("jTreeFullLike structure", full.flatten().count == 2)
+
+// Test JTreeStructure metadata
+test("JTreeStructure leaf leafCount", JTreeStructure.leaf.leafCount == 1)
+let customStructure = JTreeStructure(leafCount: 5, children: [], typeName: "Custom")
+test("JTreeStructure custom leafCount", customStructure.leafCount == 5)
+test("JTreeStructure custom typeName", customStructure.typeName == "Custom")
+
+// Test nested tree (Array of Tuple2)
+JTracerGraphBuilder.shared.reset()
+let nestedTree: [JTuple2<JTracer, JTracer>] = [
+    JTuple2(
+        JTracer(value: 1.0, shape: JTensorShape([4, 8]), dtype: .float32),
+        JTracer(value: 2.0, shape: JTensorShape([8]), dtype: .float32)
+    ),
+    JTuple2(
+        JTracer(value: 3.0, shape: JTensorShape([4, 8]), dtype: .float32),
+        JTracer(value: 4.0, shape: JTensorShape([8]), dtype: .float32)
+    )
+]
+let flattenedNested = nestedTree.flatten()
+test("Nested tree flatten count", flattenedNested.count == 4)
+
+print()
+
+// MARK: - Test 15: PRNG Operations (JPRNGKey, jRandomUniform, jRandomNormal)
+
+print("-" * 60)
+print("TEST 15: PRNG Operations (JPRNGKey, jRandomUniform, jRandomNormal)")
+print("-" * 60)
+
+// Test JPRNGKey creation
+let prngKey = JPRNGKey(seed: 42)
+test("JPRNGKey creation", prngKey.data.0 != 0 || prngKey.data.1 != 0)
+
+// Test determinism - same seed should produce same key
+let prngKey2 = JPRNGKey(seed: 42)
+test("JPRNGKey determinism", prngKey.data == prngKey2.data)
+
+// Test different seeds produce different keys
+let prngKey3 = JPRNGKey(seed: 123)
+test("JPRNGKey different seeds", prngKey.data != prngKey3.data)
+
+// Test split produces two different keys
+let (splitKey1, splitKey2) = prngKey.split()
+test("JPRNGKey split produces different keys", splitKey1.data != splitKey2.data)
+
+// Test split(into:) produces correct count
+let splitKeys = prngKey.split(into: 5)
+test("JPRNGKey split(into:) count", splitKeys.count == 5)
+
+// Test all split keys are different
+var allDifferent = true
+for i in 0..<splitKeys.count {
+    for j in (i+1)..<splitKeys.count {
+        if splitKeys[i].data == splitKeys[j].data {
+            allDifferent = false
+        }
+    }
+}
+test("JPRNGKey split(into:) all different", allDifferent)
+
+// Test fold(in:) produces different key
+let foldedKey = prngKey.fold(in: 7)
+test("JPRNGKey fold(in:) produces different key", foldedKey.data != prngKey.data)
+
+// Test jRandomUniform shape
+JTracerGraphBuilder.shared.reset()
+let uniformResult = jRandomUniform(prngKey, shape: JTensorShape([8, 16]), dtype: .float32)
+test("jRandomUniform shape", uniformResult.shape.dimensions.compactMap { $0 } == [8, 16])
+test("jRandomUniform dtype", uniformResult.dtype == .float32)
+
+// Test jRandomNormal shape
+JTracerGraphBuilder.shared.reset()
+let normalResult = jRandomNormal(prngKey, shape: JTensorShape([4, 32]), dtype: .float32)
+test("jRandomNormal shape", normalResult.shape.dimensions.compactMap { $0 } == [4, 32])
+test("jRandomNormal dtype", normalResult.dtype == .float32)
+
+// Test jRandomNormal with mean and stddev
+JTracerGraphBuilder.shared.reset()
+let normalScaled = jRandomNormal(prngKey, shape: JTensorShape([10, 20]), mean: 0.5, stddev: 0.1, dtype: .float32)
+test("jRandomNormal scaled shape", normalScaled.shape.dimensions.compactMap { $0 } == [10, 20])
+
+// Test jRandomInt shape
+JTracerGraphBuilder.shared.reset()
+let intResult = jRandomInt(prngKey, shape: JTensorShape([5, 10]), minval: 0, maxval: 100, dtype: .int32)
+test("jRandomInt shape", intResult.shape.dimensions.compactMap { $0 } == [5, 10])
+test("jRandomInt dtype", intResult.dtype == .int32)
+
+// Test jDropout preserves shape
+JTracerGraphBuilder.shared.reset()
+let dropoutInput = JTracer(value: 1.0, shape: JTensorShape([8, 16]), dtype: .float32)
+let droppedResult = jDropout(prngKey, dropoutInput, rate: 0.1)
+test("jDropout shape preserved", droppedResult.shape.dimensions.compactMap { $0 } == [8, 16])
+test("jDropout dtype preserved", droppedResult.dtype == .float32)
+
+// Test jDropout with rate 0 (no dropout)
+JTracerGraphBuilder.shared.reset()
+let noDropoutInput = JTracer(value: 2.0, shape: JTensorShape([4, 8]), dtype: .float32)
+let noDropoutResult = jDropout(prngKey, noDropoutInput, rate: 0.0)
+test("jDropout rate 0 shape", noDropoutResult.shape.dimensions.compactMap { $0 } == [4, 8])
+
+// Test jTruncatedNormal shape
+JTracerGraphBuilder.shared.reset()
+let truncNormal = jTruncatedNormal(prngKey, shape: JTensorShape([16, 32]), mean: 0, stddev: 1, dtype: .float32)
+test("jTruncatedNormal shape", truncNormal.shape.dimensions.compactMap { $0 } == [16, 32])
+
+// Test jXavierUniform shape
+JTracerGraphBuilder.shared.reset()
+let xavierU = jXavierUniform(prngKey, shape: JTensorShape([784, 256]), dtype: .float32)
+test("jXavierUniform shape", xavierU.shape.dimensions.compactMap { $0 } == [784, 256])
+
+// Test jXavierNormal shape
+JTracerGraphBuilder.shared.reset()
+let xavierN = jXavierNormal(prngKey, shape: JTensorShape([256, 128]), dtype: .float32)
+test("jXavierNormal shape", xavierN.shape.dimensions.compactMap { $0 } == [256, 128])
+
+// Test jHeUniform shape
+JTracerGraphBuilder.shared.reset()
+let heU = jHeUniform(prngKey, shape: JTensorShape([512, 256]), dtype: .float32)
+test("jHeUniform shape", heU.shape.dimensions.compactMap { $0 } == [512, 256])
+
+// Test jHeNormal shape
+JTracerGraphBuilder.shared.reset()
+let heN = jHeNormal(prngKey, shape: JTensorShape([128, 64]), dtype: .float32)
+test("jHeNormal shape", heN.shape.dimensions.compactMap { $0 } == [128, 64])
+
+// Test JRngDistribution enum
+test("JRngDistribution uniform", JRngDistribution.uniform.rawValue == "UNIFORM")
+test("JRngDistribution normal", JRngDistribution.normal.rawValue == "NORMAL")
+
+print()
+
 // MARK: - Summary
 
 print("=" * 60)
@@ -508,6 +1028,11 @@ if testsFailed == 0 {
     print("  ✓ Automatic differentiation (VJP for all ops)")
     print("  ✓ Distributed training (DeviceMesh, ShardingSpec, collectives)")
     print("  ✓ JIT compilation and PJRT execution")
+    print("  ✓ Scan operations (jScan, jCumsum, jCumprod, jScanSimple)")
+    print("  ✓ Conditional operations (jSelect, jCond, jCondWith, jWhere, jClamp)")
+    print("  ✓ Vmap operations (jVmap, jVmap2, jVmap3, jBatchedMatmul)")
+    print("  ✓ Tree operations (JTree, jTreeMap, jTreeZipWith, jTreeReduce)")
+    print("  ✓ PRNG operations (JPRNGKey, jRandomUniform, jRandomNormal, jDropout)")
     print()
     print("Ready for Jupyter/Colab deployment!")
 } else {

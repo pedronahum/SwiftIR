@@ -217,7 +217,7 @@ internal final class JTokenManager: @unchecked Sendable {
 // MARK: - Traced Operation Types
 
 /// Types of operations that can be traced
-internal enum JTracedOperation {
+public enum JTracedOperation {
     case constant(id: UInt64, value: Double, shape: JTensorShape, dtype: JDType)
     case placeholder(id: UInt64, shape: JTensorShape, dtype: JDType)
     case binary(id: UInt64, op: JBinaryOperation, lhs: UInt64, rhs: UInt64, shape: JTensorShape, dtype: JDType)
@@ -232,15 +232,23 @@ internal enum JTracedOperation {
     case binaryElementwise(id: UInt64, op: JBinaryElementwiseOp, lhs: UInt64, rhs: UInt64, shape: JTensorShape, dtype: JDType)
     case select(id: UInt64, condition: UInt64, onTrue: UInt64, onFalse: UInt64, shape: JTensorShape, dtype: JDType)
     case unaryWithAlpha(id: UInt64, op: JUnaryOperation, input: UInt64, alpha: Double, shape: JTensorShape, dtype: JDType)
+    case dynamicSlice(id: UInt64, input: UInt64, startIndex: UInt64, sliceSizes: [Int], shape: JTensorShape, dtype: JDType)
+    case dynamicUpdateSlice(id: UInt64, operand: UInt64, update: UInt64, startIndex: UInt64, shape: JTensorShape, dtype: JDType)
+    case broadcastInDim(id: UInt64, input: UInt64, broadcastDimensions: [Int], inputShape: JTensorShape, outputShape: JTensorShape, dtype: JDType)
+    case compare(id: UInt64, lhs: UInt64, rhs: UInt64, direction: JCompareDirection, shape: JTensorShape, inputDtype: JDType)
+    case transpose(id: UInt64, input: UInt64, permutation: [Int], inputShape: JTensorShape, outputShape: JTensorShape, dtype: JDType)
+    case dotGeneral(id: UInt64, lhs: UInt64, rhs: UInt64, lhsBatchingDims: [Int], rhsBatchingDims: [Int], lhsContractingDims: [Int], rhsContractingDims: [Int], resultShape: JTensorShape, dtype: JDType)
+    case rng(id: UInt64, keyData: (UInt32, UInt32), shape: JTensorShape, dtype: JDType, distribution: JRngDistribution)
+    case convert(id: UInt64, input: UInt64, inputDtype: JDType, outputDtype: JDType, shape: JTensorShape)
 }
 
 /// Binary operations
-internal enum JBinaryOperation: String {
+public enum JBinaryOperation: String {
     case add, subtract, multiply, divide, matmul
 }
 
 /// Unary operations
-internal enum JUnaryOperation: String {
+public enum JUnaryOperation: String {
     case exp, log, sqrt, abs, neg, sin, cos, tan, tanh, sigmoid, relu, reshape, transpose
     case rsqrt, floor, ceil  // Additional math operations
     case leakyRelu, elu, silu, gelu, softplus  // Advanced activations
@@ -248,12 +256,12 @@ internal enum JUnaryOperation: String {
 }
 
 /// Reduction operations
-internal enum JReductionOperation: String {
+public enum JReductionOperation: String {
     case sum, mean, max, min
 }
 
 /// Binary max/min operations
-internal enum JBinaryElementwiseOp: String {
+public enum JBinaryElementwiseOp: String {
     case maximum, minimum
 }
 
@@ -443,12 +451,19 @@ public final class JTracerGraphBuilder: @unchecked Sendable {
     }
 
     /// Get next ID (for creating region arguments)
-    func getNextId() -> UInt64 {
+    public func getNextId() -> UInt64 {
         lock.lock()
         defer { lock.unlock() }
         let id = nextId
         nextId += 1
         return id
+    }
+
+    /// Add an operation to the trace
+    public func addOperation(_ op: JTracedOperation) {
+        lock.lock()
+        defer { lock.unlock() }
+        operations.append(op)
     }
 
     public func reset() {

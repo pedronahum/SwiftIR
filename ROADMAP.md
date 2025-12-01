@@ -1,329 +1,252 @@
 # SwiftIR Roadmap
 
-**Vision**: Type-safe ML compiler construction in Swift, leveraging MLIR and modern Swift features for accessible, maintainable compiler development.
+**Vision**: Flexible ML compiler infrastructure in Swift that leverages the Swift compiler to build computation graphs with automatic differentiation, supporting multiple programming paradigms (functional transformations, tensor operations, native Swift AD) and executing via XLA/PJRT on CPU, GPU, and TPU.
 
-**Current Reality**: Working examples with string-based MLIR and experimental DSL. Research project exploring Swift as a metalanguage for MLIR.
-
----
-
-## 🎯 Project Vision
-
-### Core Value Propositions
-
-1. **Type-Safe MLIR Access** - Swift bindings to MLIR with compile-time safety
-2. **Multiple Abstractions** - String MLIR, declarative DSL, and future macro-based generation
-3. **Industry-Standard Runtime** - Execute via PJRT/XLA (same as JAX, TensorFlow)
-4. **Apple Platform Integration** - First-class Swift on iOS/macOS
-
-### Target Audiences
-
-- **ML Engineers**: Type-safe alternative to Python for ML compilation
-- **iOS/macOS Developers**: Native Swift ML without Python dependency
-- **Compiler Researchers**: Modern, safe approach to MLIR development
-- **Students & Educators**: Learn compiler construction with working examples
+**Current Status**: Production-ready with comprehensive automatic differentiation, functional transformations (vmap, scan, cond, PRNG, DiffTree), tensor-style operations, and native Swift `@differentiable` support. Executes on CPU and TPU.
 
 ---
 
-## ✅ What Works Today (Completed)
+## What's Complete
 
 ### Core Infrastructure
-- ✅ **MLIR Bindings** - Complete Swift bindings to MLIR C API
-  - Context, Module, Operation, Type, Attribute management
-  - Dialect registration (Func, Arith, Tensor, StableHLO, etc.)
-  - IR parsing and manipulation
-  - Source location tracking
+- **MLIR Bindings** - Complete Swift bindings to MLIR C API
+- **StableHLO Generation** - 80+ operations with full gradient support
+- **XLA Compilation** - Industry-standard optimizer
+- **PJRT Execution** - CPU and TPU support
 
-- ✅ **PJRT/XLA Runtime** - Full execution pipeline
-  - CPU client creation and device management
-  - Buffer allocation and data marshalling
-  - Compilation via XLA
-  - Execution with input/output handling
-  - 20+ working examples
+### Automatic Differentiation
+- **Reverse-Mode AD** - Full VJP implementation using Swift's `@differentiable`
+- **DifferentiableTracer / JTracer** - Symbolic tracing with gradient capture
+- **300+ Tests** - Comprehensive gradient verification
+- **~1.0x Gradient Overhead** - XLA fusion eliminates typical 2-4x overhead
 
-- ✅ **StableHLO Integration** - Portable ML operations
-  - Core operations: Add, Multiply, Dot, Convolution
-  - Activation functions: ReLU, Tanh, Sigmoid, Exp, Log
-  - Sequential composition with let-bindings
-  - Integration with PJRT execution
+### Programming Paradigms
 
-### Working Examples (20+)
-- ✅ **Basic Operations** - Vector addition, matrix multiplication
-- ✅ **Neural Networks** - 2-layer networks, CNNs, ResNet architectures
-- ✅ **String-based MLIR** - Parse and execute MLIR from strings
-- ✅ **Declarative DSL** - Type-safe tensor operations (experimental)
-- ✅ **GPU Code Generation** - SPIR-V and LLVM/PTX pipeline prototypes
+SwiftIR's compiler-based tracing enables multiple programming styles:
 
-### Developer Experience
-- ✅ **Comprehensive Documentation** - 11 module READMEs + main README
-- ✅ **Module Organization** - 10 well-structured modules
-- ✅ **Examples Directory** - Categorized, documented examples
-- ✅ **Build System** - Swift Package Manager integration
+| Paradigm | Description | Examples |
+|----------|-------------|----------|
+| **Functional Transformations** | JAX-style higher-order functions | `jVmap`, `jScan`, `jCond`, `JPRNGKey`, `JTree` |
+| **Tensor Operations** | PyTorch/TensorFlow-style method chaining | `x.matmul(w).relu().softmax()` |
+| **Native Swift AD** | Swift's `@differentiable` attribute | `gradient(at: x) { f($0) }` |
 
----
+### Functional Transformations (Complete)
 
-## 🚧 In Progress
+| Feature | Status | Description |
+|---------|--------|-------------|
+| **vmap** | ✅ Complete | Automatic vectorization/batching (`jVmap`, `diffVmap`) |
+| **scan** | ✅ Complete | Sequential operations (`jScan`, `jCumsum`, `jCumprod`) |
+| **cond** | ✅ Complete | Differentiable conditionals (`jCond`, `jSelect`, `jWhere`) |
+| **PRNG** | ✅ Complete | Functional random (`JPRNGKey`, `jRandomNormal`, `jDropout`) |
+| **DiffTree** | ✅ Complete | Tree-structured parameters (`JTree`, `jTreeMap`, `jTreeZipWith`) |
+| **while** | ✅ Complete | Native `stablehlo.while` with O(1) compile time |
 
-### DSL Expansion
-**Goal**: Expand declarative DSL coverage and ergonomics
+### Runtime & Hardware
+- **CPU Execution** - Full support via PJRT CPU plugin
+- **TPU Execution** - Full support via libtpu.so
+- **Runtime Detection** - Automatic TPU → GPU → CPU priority
+- **Unified API** - `PJRTClientFactory.create()` auto-selects hardware
 
-**Current Focus**:
-- 🚧 Sequential composition patterns - Partially working (let-bindings implemented)
-- 🚧 More StableHLO operations - Core ops done, advanced ops needed
-- 🚧 Type inference improvements - Basic types work, need shape inference
-- 🚧 Error messages and diagnostics - Basic errors, need better context
-
-**What's Needed**:
-- [ ] Broadcast operations for bias addition
-- [ ] Convolution with full configuration (padding, stride, dilation)
-- [ ] Pooling operations (max pool, avg pool)
-- [ ] Reduction operations (sum, max, min along axes)
-- [ ] Reshape and transpose operations
-- [ ] Control flow (if/while in StableHLO)
-
-### GPU Execution Pipeline
-**Goal**: Lower MLIR to GPU targets (SPIR-V, PTX)
-
-**Current Status**: Code generation prototypes exist, blocked on MLIR build
-
-**Blocker**: MLIR build needs GPU dialect support
-- Need to rebuild MLIR with GPU, SPIR-V, NVVM dialects enabled
-- Current build only includes StableHLO, Func, Arith, Tensor, Linalg
-- See [GPU_LOWERING_ROADMAP.md](GPU_LOWERING_ROADMAP.md) for details
-
-**What Works**:
-- ✅ SPIR-V pipeline prototype (generates SPIR-V module structure)
-- ✅ LLVM/PTX pipeline prototype (generates LLVM with nvvm attributes)
-- ✅ Examples showing intended API
-
-**What's Blocked**:
-- ❌ Actual GPU dialect operations (need MLIR rebuild)
-- ❌ GPU kernel launch configuration
-- ❌ Memory space annotations
-- ❌ SPIR-V binary serialization
-
-### Macro System
-**Goal**: Compile-time Swift → MLIR generation via macros
-
-**Current Status**: Vision defined, basic structure exists, needs implementation
-
-**What Exists**:
-- ✅ Macro module structure (SwiftIRMacros)
-- ✅ Macro definition and export (@MLIRFunction)
-- ✅ Conceptual example (Macro_Example.swift)
-- ✅ Documentation of intended behavior
-
-**What's Needed**:
-- [ ] AST traversal and analysis
-- [ ] Swift type → MLIR type mapping
-- [ ] Swift expression → MLIR operation mapping
-- [ ] SSA form generation
-- [ ] Control flow handling (if/for/while → scf dialect)
-- [ ] Error diagnostics during macro expansion
+### SwiftIRJupyter (Pure Swift)
+Complete parallel implementation for Jupyter/Colab without C++ dependencies:
+- All functional transformations (vmap, scan, cond, PRNG, DiffTree)
+- Tensor-style operations
+- 177 feature parity tests passing
+- Ready for Colab deployment
 
 ---
 
-## 🔮 Future Vision
+## Priority Roadmap
 
-### Long-term Goals (No Timeline)
+### High Priority
 
-These represent aspirational directions for the project, not committed features:
-
-#### 1. SPIR-V Shader Development
-- Direct SPIR-V dialect access from Swift
-- Shader macro system (@SPIRVShader, @SPIRVCompute)
-- Vulkan/Metal/OpenCL integration
-- Graphics and compute shader examples
-
-**Status**: Exploratory. Prototypes exist but full implementation requires significant effort.
-
-#### 2. Training & Autodiff
-- Automatic differentiation for StableHLO operations
-- Backpropagation support
-- Optimizer implementations (SGD, Adam)
-- Training loop DSL
-
-**Status**: Conceptual. Would require significant autodiff infrastructure.
-
-#### 3. High-Level ML API
-- Layer abstractions (Dense, Conv2D, BatchNorm)
-- Sequential/Functional model APIs
-- Pre-trained model loading (ONNX, SavedModel)
-- Transfer learning support
-
-**Status**: Aspirational. Current focus is on compiler infrastructure, not high-level APIs.
-
-#### 4. Production Features
-- Model quantization (INT8, FP16)
-- Dynamic shapes support
-- Streaming and batching APIs
-- Profiling and monitoring tools
-- Performance optimization
-
-**Status**: Future work. Many examples work today, but production hardening is ongoing.
-
----
-
-## 📊 Technical Architecture
-
-### Current Architecture
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                    SwiftIR (Swift)                      │
-│                                                         │
-│  ┌────────────────┐  ┌────────────────┐               │
-│  │  SwiftIRXLA    │  │ SwiftIRStableHLO│              │
-│  │  (PJRT/Runtime)│  │ (StableHLO ops) │              │
-│  └────────────────┘  └────────────────┘               │
-│                                                         │
-│  ┌────────────────────────────────────────────┐        │
-│  │  SwiftIRCore (MLIR Bindings)               │        │
-│  │  - Types, Dialects, Builders, IR           │        │
-│  └────────────────────────────────────────────┘        │
-└─────────────────────────────────────────────────────────┘
-                         │
-                         │ links against
-                         ▼
-┌─────────────────────────────────────────────────────────┐
-│        MLIR/StableHLO Libraries                         │
-│                                                         │
-│  • StableHLO v1.13.0                                   │
-│  • MLIR Dialects (Func, Arith, SCF, Tensor, Linalg)   │
-│  • LLVM Core                                           │
-└─────────────────────────────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────┐
-│        XLA/PJRT Runtime (CPU execution)                 │
-└─────────────────────────────────────────────────────────┘
-```
-
-**Key Points**:
-- 10 Swift modules providing different abstraction levels
-- Direct C API bindings to MLIR (SwiftIRCore)
-- StableHLO operations for portable ML (SwiftIRStableHLO)
-- PJRT/XLA runtime integration for execution (SwiftIRXLA)
-- String-based MLIR and experimental DSL both supported
-
----
-
-## 🎯 Real-World Use Cases Today
-
-### Use Case 1: On-Device ML for iOS/macOS
+#### 1. Higher-Order Differentiation
+**Status**: Not started
+**Complexity**: High
+**Value**: Enables Hessians, JVPs, HVPs for advanced optimization (Newton's method, natural gradient)
 
 ```swift
-import SwiftIR
-
-// Define your model in MLIR (string or DSL)
-let model = try MLIRModule.parse("""
-func.func @inference(%input: tensor<1x224x224x3xf32>) -> tensor<1x1000xf32> {
-  // Your CNN architecture here
-  %0 = stablehlo.convolution(%input, %weights) : tensor<1x224x224x3xf32>
-  return %0 : tensor<1x1000xf32>
-}
-""", context: context)
-
-// Compile and execute on device
-let client = try PJRTClient.createCPU()
-let executable = try client.compile(model)
-let predictions = try executable.execute(inputs: [imageData])
+// Target API
+let hessian = diffHessian(at: x) { f($0) }
+let hvp = diffHessianVectorProduct(at: x, vector: v) { loss($0) }
+let jvp = diffJVP(at: x, tangent: dx) { f($0) }
 ```
 
-**Benefits**: No Python runtime, fully native Swift, runs on all Apple platforms
+**Implementation**:
+- `Sources/SwiftIR/SymbolicAD/HigherOrderAD.swift`
+- `Sources/SwiftIRJupyter/JupyterHigherOrderAD.swift`
 
-### Use Case 2: ML Compiler Research
+#### 2. Gradient Checkpointing
+**Status**: Not started
+**Complexity**: Medium
+**Value**: Memory efficiency for large models (50%+ reduction by trading compute for memory)
 
 ```swift
-// Experiment with MLIR transformations
-let module = try MLIRModule.parse(mlirCode, context: context)
-
-// Apply custom passes
-let pm = PassManager(context: context)
-pm.addPass("your-custom-pass")
-try pm.run(on: module)
-
-// Inspect transformed IR
-print(module.description)
+// Target API
+let output = checkpoint(at: x) { expensiveForward($0) }
+// Recomputes forward during backward instead of storing activations
 ```
 
-**Benefits**: Type-safe IR manipulation, rapid prototyping, clear examples
+**Implementation**:
+- `Sources/SwiftIR/SymbolicAD/Checkpointing.swift`
+- `Sources/SwiftIRJupyter/JupyterCheckpointing.swift`
 
-### Use Case 3: Educational Tool
+#### 3. Shape-Typed Tensors
+**Status**: Not started
+**Complexity**: High
+**Value**: Compile-time shape checking - a unique Swift advantage over Python frameworks
 
 ```swift
-// Students can see MLIR generation in action
-let dsl = StableHLOModule(name: "simple") {
-    StableHLOFunction(name: "add", ...) {
-        Add("a", "b", type: tensorType)
-    }
-}
-
-print(dsl.buildMLIR())  // See the generated MLIR
+// Target API
+let x: Tensor<D784> = input
+let w: Tensor<D784, D256> = weights
+let y: Tensor<D256> = x.matmul(w)  // Shape verified at compile time!
 ```
 
-**Benefits**: Immediate feedback, working examples, gradual complexity
+**Implementation**:
+- `Sources/SwiftIR/TypedTensors/` (new module)
+
+### Medium Priority
+
+#### 4. GPU Execution
+**Status**: Ready (needs MLIR rebuild with GPU dialects)
+**Complexity**: Medium
+**Value**: CUDA/ROCm acceleration
+
+**Blocker**: MLIR needs rebuild with GPU, SPIR-V, NVVM dialects
+
+#### 5. Distributed Training
+**Status**: API exists, needs testing
+**Complexity**: High
+**Value**: Multi-device/multi-node training
+
+```swift
+// Existing API (needs validation)
+let mesh = DeviceMesh(shape: [2, 4], deviceIds: [...])
+let sharded = shard(params, mesh: mesh, spec: .replicated)
+```
+
+### Lower Priority
+
+#### 6. Model Serialization
+- Save/load compiled models
+- ONNX import/export
+- Checkpoint format
+
+#### 7. Pre-built Layers
+- `Linear`, `Conv2D`, `BatchNorm`, `LayerNorm`
+- Sequential/Functional model API
+- Built on DiffTree for parameter management
 
 ---
 
-## 🚀 Getting Started
+## Architecture
 
-### For Users
-
-```bash
-# Clone the repository
-git clone https://github.com/pedronahum/SwiftIR.git
-cd SwiftIR
-
-# Build the project
-swift build
-
-# Run an example
-swift run PJRT_Add_Example
 ```
-
-### For Contributors
-
-Current focus areas where contributions would be valuable:
-
-1. **DSL Expansion** - Add more StableHLO operations to the declarative DSL
-2. **Documentation** - Improve examples, add tutorials
-3. **Testing** - Add more test coverage, especially for edge cases
-4. **Bug Fixes** - Help resolve issues in the GitHub tracker
+┌─────────────────────────────────────────────────────────────────┐
+│ Your Swift Code (any paradigm)                                   │
+│ • Functional: jVmap, jScan, jCond, JPRNGKey, JTree              │
+│ • Tensor-style: x.matmul(w).relu().softmax()                    │
+│ • Native Swift: @differentiable functions                        │
+└─────────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ Swift Compiler + Symbolic Tracing                                │
+│ • Swift's type system validates your code                        │
+│ • Swift's @differentiable generates gradient rules               │
+│ • DifferentiableTracer / JTracer captures computation graph      │
+└─────────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ MLIR StableHLO Generation                                        │
+│ • Portable, versioned IR                                         │
+│ • Compatible with TensorFlow, JAX, PyTorch/XLA                  │
+└─────────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ XLA Compilation + PJRT Execution                                 │
+│ • Industry-standard optimizations                                │
+│ • CPU, GPU, TPU backends                                         │
+└─────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## 📚 Resources
+## Module Structure
+
+```
+Sources/
+├── SwiftIR/                     # C++ interop version
+│   └── SymbolicAD/
+│       ├── ADIntegration.swift      # 80+ differentiable ops
+│       ├── DifferentiableWhile.swift # While loop support
+│       ├── Vmap.swift               # ✅ Automatic vectorization
+│       ├── Scan.swift               # ✅ Sequential operations
+│       ├── Cond.swift               # ✅ Conditionals
+│       ├── PRNG.swift               # ✅ Functional random
+│       ├── DiffTree.swift           # ✅ Tree operations
+│       ├── HigherOrderAD.swift      # 🔮 Future: Hessians, JVPs
+│       └── Checkpointing.swift      # 🔮 Future: Memory efficiency
+│
+├── SwiftIRJupyter/              # Pure Swift version (no C++)
+│   ├── JupyterSymbolicAD.swift      # Core tracing
+│   ├── JupyterCompiler.swift        # MLIR generation
+│   ├── JupyterVmap.swift            # ✅ Vmap
+│   ├── JupyterScan.swift            # ✅ Scan
+│   ├── JupyterCond.swift            # ✅ Cond
+│   ├── JupyterPRNG.swift            # ✅ PRNG
+│   └── JupyterTree.swift            # ✅ DiffTree
+│
+├── SwiftIRRuntime/              # Hardware detection
+│   ├── RuntimeDetector.swift        # TPU/GPU/CPU detection
+│   └── PJRTClientFactory.swift      # Unified client creation
+│
+└── SwiftIRXLA/                  # XLA/PJRT integration
+```
+
+---
+
+## Test Coverage
+
+| Category | Tests | Status |
+|----------|-------|--------|
+| Basic Operations | 40+ | ✅ Passing |
+| Unary Operations | 30+ | ✅ Passing |
+| Matrix Operations | 20+ | ✅ Passing |
+| Loss Functions | 15+ | ✅ Passing |
+| Control Flow | 25+ | ✅ Passing |
+| Vmap | 20+ | ✅ Passing |
+| Scan | 15+ | ✅ Passing |
+| Cond | 15+ | ✅ Passing |
+| PRNG | 24+ | ✅ Passing |
+| DiffTree | 34+ | ✅ Passing |
+| **Total** | **300+** | **✅ All Passing** |
+
+Feature Parity Tests (SwiftIRJupyter): **177 tests passing**
+
+---
+
+## Resources
 
 ### Documentation
 - [README.md](README.md) - Main project documentation
-- [Sources/README.md](Sources/README.md) - Architecture overview
-- [GPU_LOWERING_ROADMAP.md](GPU_LOWERING_ROADMAP.md) - GPU execution roadmap
-- [Examples/](Examples/) - 20+ working examples
+- [Examples/BENCHMARK_RESULTS.md](Examples/BENCHMARK_RESULTS.md) - Performance data
+- [GPU_LOWERING_ROADMAP.md](GPU_LOWERING_ROADMAP.md) - GPU implementation plan
 
-### Module Documentation
-Each module has detailed documentation:
-- [SwiftIRCore](Sources/SwiftIRCore/README.md) - MLIR bindings
-- [SwiftIRStableHLO](Sources/SwiftIRStableHLO/README.md) - StableHLO operations
-- [SwiftIRXLA](Sources/SwiftIRXLA/README.md) - PJRT/XLA runtime
-- [SwiftIRMacros](Sources/SwiftIRMacros/README.md) - Macro system
+### Specifications
+- [Jax/01-VMAP-SPEC.md](Jax/01-VMAP-SPEC.md) - Vmap specification
+- [Jax/02-SCAN-SPEC.md](Jax/02-SCAN-SPEC.md) - Scan specification
+- [Jax/03-COND-SPEC.md](Jax/03-COND-SPEC.md) - Cond specification
+- [Jax/06-PRNG-SPEC.md](Jax/06-PRNG-SPEC.md) - PRNG specification
+- [Jax/08-PYTREES-SPEC.md](Jax/08-PYTREES-SPEC.md) - DiffTree specification
 
 ### External References
 - [StableHLO Specification](https://github.com/openxla/stablehlo/blob/main/docs/spec.md)
 - [MLIR Documentation](https://mlir.llvm.org/)
 - [XLA Documentation](https://www.tensorflow.org/xla)
-- [Swift Forums Discussion](https://forums.swift.org/t/swift-as-syntactic-sugar-for-mlir/27672)
 
 ---
 
-## 🤝 Community & Support
-
-- **GitHub**: [github.com/pedronahum/SwiftIR](https://github.com/pedronahum/SwiftIR)
-- **Issues**: Report bugs and request features
-- **Discussions**: Design discussions and questions
-- **Swift Forums**: Engage with the broader Swift community
-
----
-
-**Last Updated**: November 11, 2025
-**Current Focus**: DSL expansion, GPU execution (blocked), macro system (exploratory)
-**Project Status**: Research project with working examples
+**Last Updated**: December 1, 2025
+**Current Focus**: Higher-Order AD, Checkpointing, Shape-Typed Tensors
+**Project Status**: Production-ready with multiple programming paradigms

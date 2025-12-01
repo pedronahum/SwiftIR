@@ -737,6 +737,242 @@ public class JTracingContext {
                     builder.addOperation(JMLIROperation(result: result, opName: "stablehlo.abs", operands: [inputName], resultType: typeStr))
                 }
                 valueMap[id] = result
+
+            case .dynamicSlice(let id, let input, let startIndex, let sliceSizes, let shape, let dtype):
+                let result = "%v\(id)"
+                let inputName = valueMap[input] ?? "%v\(input)"
+                let indexName = valueMap[startIndex] ?? "%v\(startIndex)"
+                let shapeStr = shape.dimensions.compactMap { $0 }.map(String.init).joined(separator: "x")
+                let typeStr = shape.rank == 0 ? "tensor<\(dtype.rawValue)>" : "tensor<\(shapeStr)x\(dtype.rawValue)>"
+
+                // Convert float index to i32
+                let indexI32 = "%dyn_slice_idx_\(id)"
+                builder.addOperation(JMLIROperation(
+                    result: indexI32,
+                    opName: "stablehlo.convert",
+                    operands: [indexName],
+                    resultType: "tensor<i32>"
+                ))
+
+                // Create zero indices for remaining dimensions
+                var startIndices = [indexI32]
+                for i in 1..<sliceSizes.count {
+                    let zeroIdx = "%dyn_slice_zero_\(id)_\(i)"
+                    builder.addOperation(JMLIROperation(
+                        result: zeroIdx,
+                        opName: "stablehlo.constant",
+                        operands: [],
+                        attributes: ["value": "dense<0> : tensor<i32>"],
+                        resultType: "tensor<i32>"
+                    ))
+                    startIndices.append(zeroIdx)
+                }
+
+                // Intermediate result with slice (includes leading 1 dimension)
+                let intermediateShape = sliceSizes
+                let intermediateShapeStr = intermediateShape.map(String.init).joined(separator: "x")
+                let intermediateType = "tensor<\(intermediateShapeStr)x\(dtype.rawValue)>"
+                let intermediate = "%dyn_slice_intermediate_\(id)"
+
+                builder.addOperation(JMLIROperation(
+                    result: intermediate,
+                    opName: "stablehlo.dynamic_slice",
+                    operands: [inputName] + startIndices,
+                    attributes: ["slice_sizes": "array<i64: \(sliceSizes.map(String.init).joined(separator: ", "))>"],
+                    resultType: intermediateType
+                ))
+
+                // Reshape to remove leading 1 dimension
+                builder.addOperation(JMLIROperation(
+                    result: result,
+                    opName: "stablehlo.reshape",
+                    operands: [intermediate],
+                    resultType: typeStr
+                ))
+                valueMap[id] = result
+
+            case .dynamicUpdateSlice(let id, let operand, let update, let startIndex, let shape, let dtype):
+                let result = "%v\(id)"
+                let operandName = valueMap[operand] ?? "%v\(operand)"
+                let updateName = valueMap[update] ?? "%v\(update)"
+                let indexName = valueMap[startIndex] ?? "%v\(startIndex)"
+                let shapeStr = shape.dimensions.compactMap { $0 }.map(String.init).joined(separator: "x")
+                let typeStr = shape.rank == 0 ? "tensor<\(dtype.rawValue)>" : "tensor<\(shapeStr)x\(dtype.rawValue)>"
+
+                // Convert float index to i32
+                let indexI32 = "%dyn_update_idx_\(id)"
+                builder.addOperation(JMLIROperation(
+                    result: indexI32,
+                    opName: "stablehlo.convert",
+                    operands: [indexName],
+                    resultType: "tensor<i32>"
+                ))
+
+                // Expand update to have leading 1 dimension
+                // First, figure out update shape from operand shape
+                let operandDims = shape.dimensions.compactMap { $0 }
+                let updateDims = Array(operandDims.dropFirst())
+                let expandedDims = [1] + updateDims
+                let expandedShapeStr = expandedDims.map(String.init).joined(separator: "x")
+                let expandedType = "tensor<\(expandedShapeStr)x\(dtype.rawValue)>"
+                let expandedUpdate = "%dyn_update_expanded_\(id)"
+
+                builder.addOperation(JMLIROperation(
+                    result: expandedUpdate,
+                    opName: "stablehlo.reshape",
+                    operands: [updateName],
+                    resultType: expandedType
+                ))
+
+                // Create zero indices for remaining dimensions
+                var startIndices = [indexI32]
+                for i in 1..<operandDims.count {
+                    let zeroIdx = "%dyn_update_zero_\(id)_\(i)"
+                    builder.addOperation(JMLIROperation(
+                        result: zeroIdx,
+                        opName: "stablehlo.constant",
+                        operands: [],
+                        attributes: ["value": "dense<0> : tensor<i32>"],
+                        resultType: "tensor<i32>"
+                    ))
+                    startIndices.append(zeroIdx)
+                }
+
+                builder.addOperation(JMLIROperation(
+                    result: result,
+                    opName: "stablehlo.dynamic_update_slice",
+                    operands: [operandName, expandedUpdate] + startIndices,
+                    resultType: typeStr
+                ))
+                valueMap[id] = result
+
+            case .broadcastInDim(let id, let input, let broadcastDimensions, _, let outputShape, let dtype):
+                let result = "%v\(id)"
+                let inputName = valueMap[input] ?? "%v\(input)"
+                let outShapeStr = outputShape.dimensions.compactMap { $0 }.map(String.init).joined(separator: "x")
+                let typeStr = outputShape.rank == 0 ? "tensor<\(dtype.rawValue)>" : "tensor<\(outShapeStr)x\(dtype.rawValue)>"
+                let dimsStr = broadcastDimensions.map(String.init).joined(separator: ", ")
+
+                builder.addOperation(JMLIROperation(
+                    result: result,
+                    opName: "stablehlo.broadcast_in_dim",
+                    operands: [inputName],
+                    attributes: ["broadcast_dimensions": "array<i64: \(dimsStr)>"],
+                    resultType: typeStr
+                ))
+                valueMap[id] = result
+
+            case .compare(let id, let lhs, let rhs, let direction, let shape, let inputDtype):
+                let result = "%v\(id)"
+                let lhsName = valueMap[lhs] ?? "%v\(lhs)"
+                let rhsName = valueMap[rhs] ?? "%v\(rhs)"
+                let shapeStr = shape.dimensions.compactMap { $0 }.map(String.init).joined(separator: "x")
+                let resultType = shape.rank == 0 ? "tensor<i1>" : "tensor<\(shapeStr)xi1>"
+                let inputTypeStr = shape.rank == 0 ? "tensor<\(inputDtype.rawValue)>" : "tensor<\(shapeStr)x\(inputDtype.rawValue)>"
+
+                builder.addOperation(JMLIROperation(
+                    result: result,
+                    opName: "stablehlo.compare",
+                    operands: [lhsName, rhsName],
+                    attributes: ["comparison_direction": "#stablehlo<comparison_direction \(direction.rawValue)>"],
+                    resultType: resultType
+                ))
+                valueMap[id] = result
+
+            case .transpose(let id, let input, let permutation, _, let outputShape, let dtype):
+                let result = "%v\(id)"
+                let inputName = valueMap[input] ?? "%v\(input)"
+                let outShapeStr = outputShape.dimensions.compactMap { $0 }.map(String.init).joined(separator: "x")
+                let typeStr = outputShape.rank == 0 ? "tensor<\(dtype.rawValue)>" : "tensor<\(outShapeStr)x\(dtype.rawValue)>"
+                let permStr = permutation.map(String.init).joined(separator: ", ")
+
+                builder.addOperation(JMLIROperation(
+                    result: result,
+                    opName: "stablehlo.transpose",
+                    operands: [inputName],
+                    attributes: ["permutation": "array<i64: \(permStr)>"],
+                    resultType: typeStr
+                ))
+                valueMap[id] = result
+
+            case .dotGeneral(let id, let lhs, let rhs, let lhsBatchingDims, let rhsBatchingDims, let lhsContractingDims, let rhsContractingDims, let resultShape, let dtype):
+                let result = "%v\(id)"
+                let lhsName = valueMap[lhs] ?? "%v\(lhs)"
+                let rhsName = valueMap[rhs] ?? "%v\(rhs)"
+                let shapeStr = resultShape.dimensions.compactMap { $0 }.map(String.init).joined(separator: "x")
+                let typeStr = resultShape.rank == 0 ? "tensor<\(dtype.rawValue)>" : "tensor<\(shapeStr)x\(dtype.rawValue)>"
+
+                let lhsBatchStr = lhsBatchingDims.map(String.init).joined(separator: ", ")
+                let rhsBatchStr = rhsBatchingDims.map(String.init).joined(separator: ", ")
+                let lhsContractStr = lhsContractingDims.map(String.init).joined(separator: ", ")
+                let rhsContractStr = rhsContractingDims.map(String.init).joined(separator: ", ")
+
+                builder.addOperation(JMLIROperation(
+                    result: result,
+                    opName: "stablehlo.dot_general",
+                    operands: [lhsName, rhsName],
+                    attributes: [
+                        "dot_dimension_numbers": "#stablehlo.dot<lhs_batching_dimensions = [\(lhsBatchStr)], rhs_batching_dimensions = [\(rhsBatchStr)], lhs_contracting_dimensions = [\(lhsContractStr)], rhs_contracting_dimensions = [\(rhsContractStr)]>"
+                    ],
+                    resultType: typeStr
+                ))
+                valueMap[id] = result
+
+            case .rng(let id, let keyData, let shape, let dtype, let distribution):
+                let result = "%v\(id)"
+                let shapeStr = shape.dimensions.compactMap { $0 }.map(String.init).joined(separator: "x")
+                let typeStr = shape.rank == 0 ? "tensor<\(dtype.rawValue)>" : "tensor<\(shapeStr)x\(dtype.rawValue)>"
+
+                // For RNG, we create constants for min/max based on distribution
+                let distName = distribution == .uniform ? "UNIFORM" : "NORMAL"
+
+                // Create min/max constants for uniform/normal
+                let minResult = "%rng_min_\(id)"
+                let maxResult = "%rng_max_\(id)"
+
+                // Use _raw_mlir attribute for constant values
+                builder.addOperation(JMLIROperation(
+                    result: minResult,
+                    opName: "stablehlo.constant",
+                    operands: [],
+                    attributes: ["_raw_mlir": "\(minResult) = stablehlo.constant dense<0.0> : tensor<\(dtype.rawValue)>"],
+                    resultType: "tensor<\(dtype.rawValue)>"
+                ))
+                builder.addOperation(JMLIROperation(
+                    result: maxResult,
+                    opName: "stablehlo.constant",
+                    operands: [],
+                    attributes: ["_raw_mlir": "\(maxResult) = stablehlo.constant dense<1.0> : tensor<\(dtype.rawValue)>"],
+                    resultType: "tensor<\(dtype.rawValue)>"
+                ))
+
+                // RNG operation - use raw MLIR for correct syntax
+                let shapeAttrStr = shape.dimensions.compactMap { $0 }.map(String.init).joined(separator: ", ")
+                builder.addOperation(JMLIROperation(
+                    result: result,
+                    opName: "stablehlo.rng",
+                    operands: [minResult, maxResult],
+                    attributes: [
+                        "_raw_mlir": "\(result) = stablehlo.rng \(minResult), \(maxResult), shape = [\(shapeAttrStr)], distribution = #stablehlo<rng_distribution \(distName)> : \(typeStr)"
+                    ],
+                    resultType: typeStr
+                ))
+                valueMap[id] = result
+
+            case .convert(let id, let input, _, let outputDtype, let shape):
+                let result = "%v\(id)"
+                let inputName = valueMap[input] ?? "%v\(input)"
+                let shapeStr = shape.dimensions.compactMap { $0 }.map(String.init).joined(separator: "x")
+                let typeStr = shape.rank == 0 ? "tensor<\(outputDtype.rawValue)>" : "tensor<\(shapeStr)x\(outputDtype.rawValue)>"
+
+                builder.addOperation(JMLIROperation(
+                    result: result,
+                    opName: "stablehlo.convert",
+                    operands: [inputName],
+                    attributes: [:],
+                    resultType: typeStr
+                ))
+                valueMap[id] = result
             }
         }
     }
@@ -762,14 +998,30 @@ public class JTracingContext {
                  .concatenate(let opId, _, _, let shape, let dtype),
                  .binaryElementwise(let opId, _, _, _, let shape, let dtype),
                  .select(let opId, _, _, _, let shape, let dtype),
-                 .unaryWithAlpha(let opId, _, _, _, let shape, let dtype):
+                 .unaryWithAlpha(let opId, _, _, _, let shape, let dtype),
+                 .dynamicSlice(let opId, _, _, _, let shape, let dtype),
+                 .dynamicUpdateSlice(let opId, _, _, _, let shape, let dtype),
+                 .broadcastInDim(let opId, _, _, _, let shape, let dtype),
+                 .transpose(let opId, _, _, _, let shape, let dtype),
+                 .dotGeneral(let opId, _, _, _, _, _, _, let shape, let dtype),
+                 .rng(let opId, _, let shape, let dtype, _):
                 if opId == id {
                     let shapeStr = shape.dimensions.compactMap { $0 }.map(String.init).joined(separator: "x")
                     return shape.rank == 0 ? "tensor<\(dtype.rawValue)>" : "tensor<\(shapeStr)x\(dtype.rawValue)>"
                 }
+            case .compare(let opId, _, _, _, let shape, _):
+                if opId == id {
+                    let shapeStr = shape.dimensions.compactMap { $0 }.map(String.init).joined(separator: "x")
+                    return shape.rank == 0 ? "tensor<i1>" : "tensor<\(shapeStr)xi1>"
+                }
             case .comparison(let opId, _, _, _, _):
                 if opId == id {
                     return "tensor<i1>"
+                }
+            case .convert(let opId, _, _, let outputDtype, let shape):
+                if opId == id {
+                    let shapeStr = shape.dimensions.compactMap { $0 }.map(String.init).joined(separator: "x")
+                    return shape.rank == 0 ? "tensor<\(outputDtype.rawValue)>" : "tensor<\(shapeStr)x\(outputDtype.rawValue)>"
                 }
             }
         }
@@ -1019,6 +1271,71 @@ public class JTracingContext {
             let typeStr = shape.rank == 0 ? "tensor<\(dtype.rawValue)>" : "tensor<\(shapeStr)x\(dtype.rawValue)>"
             // Simplified version for while loops - full expansion in main convertToMLIR
             return "\(result) = stablehlo.abs \(inputName) : \(typeStr)"
+
+        case .dynamicSlice(let id, let input, let startIndex, let sliceSizes, let shape, let dtype):
+            let result = "%v\(id)"
+            let inputName = getValueName(input, argIds: argIds, argNames: argNames)
+            let indexName = getValueName(startIndex, argIds: argIds, argNames: argNames)
+            let shapeStr = shape.dimensions.compactMap { $0 }.map(String.init).joined(separator: "x")
+            let typeStr = shape.rank == 0 ? "tensor<\(dtype.rawValue)>" : "tensor<\(shapeStr)x\(dtype.rawValue)>"
+            // Simplified - full dynamic slice needs multiple operations
+            return "\(result) = stablehlo.reshape \(inputName) : \(typeStr)"
+
+        case .dynamicUpdateSlice(let id, let operand, _, _, let shape, let dtype):
+            let result = "%v\(id)"
+            let operandName = getValueName(operand, argIds: argIds, argNames: argNames)
+            let shapeStr = shape.dimensions.compactMap { $0 }.map(String.init).joined(separator: "x")
+            let typeStr = shape.rank == 0 ? "tensor<\(dtype.rawValue)>" : "tensor<\(shapeStr)x\(dtype.rawValue)>"
+            // Simplified - pass through operand
+            return "\(result) = stablehlo.reshape \(operandName) : \(typeStr)"
+
+        case .broadcastInDim(let id, let input, let broadcastDimensions, _, let outputShape, let dtype):
+            let result = "%v\(id)"
+            let inputName = getValueName(input, argIds: argIds, argNames: argNames)
+            let outShapeStr = outputShape.dimensions.compactMap { $0 }.map(String.init).joined(separator: "x")
+            let typeStr = outputShape.rank == 0 ? "tensor<\(dtype.rawValue)>" : "tensor<\(outShapeStr)x\(dtype.rawValue)>"
+            let dimsStr = broadcastDimensions.map(String.init).joined(separator: ", ")
+            return "\(result) = stablehlo.broadcast_in_dim \(inputName), dims = [\(dimsStr)] : (tensor<\(dtype.rawValue)>) -> \(typeStr)"
+
+        case .compare(let id, let lhs, let rhs, let direction, let shape, let inputDtype):
+            let result = "%v\(id)"
+            let lhsName = getValueName(lhs, argIds: argIds, argNames: argNames)
+            let rhsName = getValueName(rhs, argIds: argIds, argNames: argNames)
+            let shapeStr = shape.dimensions.compactMap { $0 }.map(String.init).joined(separator: "x")
+            let resultType = shape.rank == 0 ? "tensor<i1>" : "tensor<\(shapeStr)xi1>"
+            return "\(result) = stablehlo.compare \(lhsName), \(rhsName), \(direction.rawValue) : (\(resultType))"
+
+        case .transpose(let id, let input, let permutation, _, let outputShape, let dtype):
+            let result = "%v\(id)"
+            let inputName = getValueName(input, argIds: argIds, argNames: argNames)
+            let outShapeStr = outputShape.dimensions.compactMap { $0 }.map(String.init).joined(separator: "x")
+            let typeStr = outputShape.rank == 0 ? "tensor<\(dtype.rawValue)>" : "tensor<\(outShapeStr)x\(dtype.rawValue)>"
+            let permStr = permutation.map(String.init).joined(separator: ", ")
+            return "\(result) = stablehlo.transpose \(inputName), dims = [\(permStr)] : \(typeStr)"
+
+        case .dotGeneral(let id, let lhs, let rhs, let lhsBatchingDims, let rhsBatchingDims, let lhsContractingDims, let rhsContractingDims, let resultShape, let dtype):
+            let result = "%v\(id)"
+            let lhsName = getValueName(lhs, argIds: argIds, argNames: argNames)
+            let rhsName = getValueName(rhs, argIds: argIds, argNames: argNames)
+            let shapeStr = resultShape.dimensions.compactMap { $0 }.map(String.init).joined(separator: "x")
+            let typeStr = resultShape.rank == 0 ? "tensor<\(dtype.rawValue)>" : "tensor<\(shapeStr)x\(dtype.rawValue)>"
+            // Simplified version for while loop contexts
+            return "\(result) = stablehlo.dot_general \(lhsName), \(rhsName) : \(typeStr)"
+
+        case .rng(let id, _, let shape, let dtype, let distribution):
+            let result = "%v\(id)"
+            let shapeStr = shape.dimensions.compactMap { $0 }.map(String.init).joined(separator: "x")
+            let typeStr = shape.rank == 0 ? "tensor<\(dtype.rawValue)>" : "tensor<\(shapeStr)x\(dtype.rawValue)>"
+            let distName = distribution == .uniform ? "UNIFORM" : "NORMAL"
+            // Simplified - would need min/max constants in full version
+            return "\(result) = stablehlo.rng %zero, %one, shape = [\(shapeStr)], distribution = \(distName) : \(typeStr)"
+
+        case .convert(let id, let input, _, let outputDtype, let shape):
+            let result = "%v\(id)"
+            let inputName = getValueName(input, argIds: argIds, argNames: argNames)
+            let shapeStr = shape.dimensions.compactMap { $0 }.map(String.init).joined(separator: "x")
+            let typeStr = shape.rank == 0 ? "tensor<\(outputDtype.rawValue)>" : "tensor<\(shapeStr)x\(outputDtype.rawValue)>"
+            return "\(result) = stablehlo.convert \(inputName) : \(typeStr)"
         }
     }
 
