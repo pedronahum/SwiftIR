@@ -232,7 +232,23 @@ jobs:
           build --host_cxxopt=-std=c++17
           EOF
 
-      - name: Build PJRT CPU Plugin
+      - name: Copy SwiftIR patch sources to XLA
+        run: |
+          # Copy SwiftIR profiler BUILD and source files to XLA repo
+          # These files build libswiftir_profiler.so which wraps TSL profiler
+          cp -r $GITHUB_WORKSPACE/xla-patches/swiftir ~/swiftir-build/xla/
+          echo "Copied SwiftIR profiler sources:"
+          ls -la ~/swiftir-build/xla/swiftir/
+
+          # Copy patched PJRT CPU plugin with profiler extension and TraceMe API
+          # This replaces the standard CPU plugin with one that includes:
+          # - Profiler extension for TensorBoard integration
+          # - TraceMe C API for unified Swift/XLA tracing
+          cp -r $GITHUB_WORKSPACE/xla-patches/pjrt_cpu ~/swiftir-build/xla/
+          echo "Copied patched PJRT CPU plugin sources:"
+          ls -la ~/swiftir-build/xla/pjrt_cpu/
+
+      - name: Build PJRT CPU Plugin and SwiftIR Profiler
         run: |
           cd ~/swiftir-build/xla
 
@@ -240,46 +256,46 @@ jobs:
           bazelisk shutdown || true
           bazelisk clean --expunge || true
 
-          # Build PJRT plugin
+          # Build patched PJRT plugin (with profiler extension + TraceMe API) and SwiftIR profiler
+          # - pjrt_c_api_cpu_plugin_profiler.so: CPU plugin with profiler extension and TraceMe API
+          # - libswiftir_profiler.so: Standalone profiler (~42MB) for fallback/legacy use
           bazelisk --output_user_root=~/swiftir-build/xla-bazelisk-build \
-            build //xla/pjrt/c:pjrt_c_api_cpu_plugin.so \
-                   //xla/pjrt/proto:compile_options_proto
+            build //pjrt_cpu:pjrt_c_api_cpu_plugin_profiler.so \
+                  //swiftir:libswiftir_profiler.so
 
-      - name: Install PJRT Plugin and Libraries
+      - name: Install PJRT Plugin and SwiftIR Profiler
         run: |
           cd ~/swiftir-build/xla
+          BAZEL_OUT=~/swiftir-build/xla-bazelisk-build
 
-          # Find and copy plugin
-          PLUGIN_PATH=$(find ~/swiftir-build/xla-bazelisk-build -name "pjrt_c_api_cpu_plugin.so" -type f 2>/dev/null | head -1)
+          # Find and copy patched PJRT plugin (rename to standard name for compatibility)
+          PLUGIN_PATH=$(find $BAZEL_OUT -name "pjrt_c_api_cpu_plugin_profiler.so" -type f 2>/dev/null | head -1)
           if [ -n "$PLUGIN_PATH" ]; then
-            cp "$PLUGIN_PATH" /opt/swiftir-deps/lib/
-            echo "✅ PJRT CPU plugin installed"
+            cp "$PLUGIN_PATH" /opt/swiftir-deps/lib/pjrt_c_api_cpu_plugin.so
+            echo "✅ PJRT CPU plugin (with profiler + TraceMe) installed"
           else
             echo "❌ PJRT plugin not found"
             exit 1
           fi
 
-          # Copy XLA proto libraries
-          mkdir -p /opt/swiftir-deps/lib/xla
-          find ~/swiftir-build/xla-bazelisk-build -name "*_proto*.pic.a" -path "*/xla/*" -exec cp {} /opt/swiftir-deps/lib/xla/ \; 2>/dev/null || true
-
-          # Copy protobuf libraries
-          mkdir -p /opt/swiftir-deps/lib/protobuf
-          find ~/swiftir-build/xla-bazelisk-build -path "*/com_google_protobuf/*.pic.a" -exec cp {} /opt/swiftir-deps/lib/protobuf/ \; 2>/dev/null || true
-
-          # Copy abseil libraries
-          mkdir -p /opt/swiftir-deps/lib/absl
-          find ~/swiftir-build/xla-bazelisk-build -path "*/com_google_absl/*.pic.a" -exec cp {} /opt/swiftir-deps/lib/absl/ \; 2>/dev/null || true
+          # Find and copy SwiftIR profiler library
+          # This is a monolithic ~42MB library with all TSL profiler dependencies
+          PROFILER_PATH=$(find $BAZEL_OUT -name "libswiftir_profiler.so" -type f 2>/dev/null | head -1)
+          if [ -n "$PROFILER_PATH" ]; then
+            cp "$PROFILER_PATH" /opt/swiftir-deps/lib/
+            echo "✅ SwiftIR profiler installed ($(du -h "$PROFILER_PATH" | cut -f1))"
+          else
+            echo "❌ SwiftIR profiler not found"
+            exit 1
+          fi
 
           # Copy PJRT headers
           mkdir -p /opt/swiftir-deps/include/xla/pjrt/c
           cp xla/pjrt/c/*.h /opt/swiftir-deps/include/xla/pjrt/c/ 2>/dev/null || true
 
+          echo ""
           echo "Installed libraries:"
           ls -la /opt/swiftir-deps/lib/*.so 2>/dev/null || true
-          echo "XLA proto libs: $(ls /opt/swiftir-deps/lib/xla/*.a 2>/dev/null | wc -l)"
-          echo "Protobuf libs: $(ls /opt/swiftir-deps/lib/protobuf/*.a 2>/dev/null | wc -l)"
-          echo "Abseil libs: $(ls /opt/swiftir-deps/lib/absl/*.a 2>/dev/null | wc -l)"
 
       # ============================================================
       # 5. Build SwiftIRMLIR Library
@@ -302,7 +318,7 @@ jobs:
             exit 1
           fi
 
-      - name: Build PJRTProtoHelper
+      - name: Build PJRTProtoHelper and PJRTSimpleWrapper
         run: |
           cd $GITHUB_WORKSPACE/Sources/PJRTCWrappers
           mkdir -p build && cd build
@@ -310,7 +326,7 @@ jobs:
           cmake .. -DCMAKE_BUILD_TYPE=Release
           cmake --build . --parallel $(nproc)
 
-          # Copy library to deps dir
+          # Copy libraries to deps dir
           if [ -f "libPJRTProtoHelper.so" ]; then
             cp libPJRTProtoHelper.so /opt/swiftir-deps/lib/
             echo "✅ PJRTProtoHelper built and installed"
@@ -318,6 +334,35 @@ jobs:
             echo "❌ PJRTProtoHelper not found"
             exit 1
           fi
+
+          if [ -f "libPJRTSimpleWrapper.so" ]; then
+            cp libPJRTSimpleWrapper.so /opt/swiftir-deps/lib/
+            echo "✅ PJRTSimpleWrapper built and installed"
+          else
+            echo "❌ PJRTSimpleWrapper not found"
+            exit 1
+          fi
+
+      - name: Build JupyterMLIRWrapper
+        run: |
+          cd $GITHUB_WORKSPACE/Sources/JupyterCWrappers
+          mkdir -p build && cd build
+
+          export SWIFTIR_DEPS=/opt/swiftir-deps
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          cmake --build . --parallel $(nproc)
+
+          # Copy library to deps dir
+          if [ -f "libJupyterMLIRWrapper.so" ]; then
+            cp libJupyterMLIRWrapper.so /opt/swiftir-deps/lib/
+            echo "✅ JupyterMLIRWrapper built and installed"
+          else
+            echo "❌ JupyterMLIRWrapper not found"
+            exit 1
+          fi
+
+      # Note: SwiftIRProfiler (libswiftir_profiler.so) is built via Bazel
+      # alongside the PJRT plugin and already installed above
 
       # ============================================================
       # 6. Build and Test SwiftIR

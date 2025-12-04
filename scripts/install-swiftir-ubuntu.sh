@@ -379,6 +379,17 @@ if [ "$SKIP_XLA" = false ]; then
     git fetch origin
     git checkout "$XLA_COMMIT"
 
+    # Copy SwiftIR profiler sources to XLA
+    # These files build libswiftir_profiler.so which wraps TSL profiler
+    log_info "Copying SwiftIR profiler sources to XLA..."
+    cp -r "$SCRIPT_DIR/../xla-patches/swiftir" .
+    ls -la swiftir/
+
+    # Copy patched PJRT CPU plugin with profiler extension and TraceMe API
+    log_info "Copying patched PJRT CPU plugin sources to XLA..."
+    cp -r "$SCRIPT_DIR/../xla-patches/pjrt_cpu" .
+    ls -la pjrt_cpu/
+
     # Configure XLA
     python3 ./configure.py --backend=CPU
 
@@ -394,99 +405,39 @@ EOF
     bazelisk shutdown || true
     bazelisk clean --expunge || true
 
-    # Build PJRT plugin and proto libraries
+    # Build patched PJRT plugin (with profiler extension + TraceMe API) and SwiftIR profiler
+    # - pjrt_c_api_cpu_plugin_profiler.so: CPU plugin with profiler extension and TraceMe API
+    # - libswiftir_profiler.so: Standalone profiler (~42MB) for fallback/legacy use
     bazelisk --output_user_root="$BUILD_DIR/xla-bazelisk-build" \
-        build //xla/pjrt/c:pjrt_c_api_cpu_plugin.so \
-               //xla/pjrt/proto:compile_options_proto
+        build //pjrt_cpu:pjrt_c_api_cpu_plugin_profiler.so \
+              //swiftir:libswiftir_profiler.so
 
-    # Find bazel output directory
-    XLA_BAZEL_BIN=$(find "$BUILD_DIR/xla-bazelisk-build" -type d -name "k8-opt" -path "*/bazel-out/*" 2>/dev/null | head -1)
-    if [ -z "$XLA_BAZEL_BIN" ]; then
-        XLA_BAZEL_BIN="bazel-bin"
-    else
-        XLA_BAZEL_BIN="$XLA_BAZEL_BIN/bin"
-    fi
-    log_info "XLA bazel bin: $XLA_BAZEL_BIN"
-
-    # Find and copy plugin
-    PLUGIN_PATH=""
-    if [ -f "bazel-bin/xla/pjrt/c/pjrt_c_api_cpu_plugin.so" ]; then
-        PLUGIN_PATH="bazel-bin/xla/pjrt/c/pjrt_c_api_cpu_plugin.so"
-    elif [ -f "$BUILD_DIR/xla/bazel-bin/xla/pjrt/c/pjrt_c_api_cpu_plugin.so" ]; then
-        PLUGIN_PATH="$BUILD_DIR/xla/bazel-bin/xla/pjrt/c/pjrt_c_api_cpu_plugin.so"
-    else
-        # Search in custom bazel output root
-        PLUGIN_PATH=$(find "$BUILD_DIR/xla-bazelisk-build" -name "pjrt_c_api_cpu_plugin.so" -type f 2>/dev/null | head -1)
-    fi
-
+    # Find and install patched PJRT plugin (rename to standard name for compatibility)
+    log_info "Installing PJRT plugin..."
+    PLUGIN_PATH=$(find "$BUILD_DIR/xla-bazelisk-build" -name "pjrt_c_api_cpu_plugin_profiler.so" -type f 2>/dev/null | head -1)
     if [ -n "$PLUGIN_PATH" ] && [ -f "$PLUGIN_PATH" ]; then
-        cp "$PLUGIN_PATH" "$DEPS_DIR/lib/"
-        log_success "PJRT CPU plugin installed to $DEPS_DIR/lib/"
+        cp "$PLUGIN_PATH" "$DEPS_DIR/lib/pjrt_c_api_cpu_plugin.so"
+        log_success "PJRT CPU plugin (with profiler + TraceMe) installed to $DEPS_DIR/lib/"
     else
         log_warn "PJRT plugin not found - XLA build may have failed"
     fi
 
-    # Copy XLA proto libraries for PJRTProtoHelper
-    log_info "Copying XLA proto libraries..."
-    mkdir -p "$DEPS_DIR/lib/xla"
-
-    # Find and copy all proto .pic.a files
-    find "$BUILD_DIR/xla-bazelisk-build" -name "*_proto*.pic.a" -path "*/xla/*" -exec cp {} "$DEPS_DIR/lib/xla/" \; 2>/dev/null || true
-    find "$BUILD_DIR/xla-bazelisk-build" -name "*compile_options*.pic.a" -exec cp {} "$DEPS_DIR/lib/xla/" \; 2>/dev/null || true
-    # Include TSL proto libraries (error_codes, etc.)
-    find "$BUILD_DIR/xla-bazelisk-build" -path "*/tsl/*_proto*.pic.a" -exec cp {} "$DEPS_DIR/lib/xla/" \; 2>/dev/null || true
-
-    # Copy protobuf libraries
-    mkdir -p "$DEPS_DIR/lib/protobuf"
-    find "$BUILD_DIR/xla-bazelisk-build" -path "*/com_google_protobuf/*.pic.a" -exec cp {} "$DEPS_DIR/lib/protobuf/" \; 2>/dev/null || true
-
-    # Copy abseil libraries (need the log/libglobals.pic.a specifically)
-    mkdir -p "$DEPS_DIR/lib/absl"
-    find "$BUILD_DIR/xla-bazelisk-build" -path "*/com_google_absl/*.pic.a" -exec cp {} "$DEPS_DIR/lib/absl/" \; 2>/dev/null || true
-    # Ensure we have the correct globals lib with logging functions
-    GLOBALS_LIB=$(find "$BUILD_DIR/xla-bazelisk-build" -path "*/absl/log/libglobals.pic.a" -not -path "*/internal/*" 2>/dev/null | head -1)
-    if [ -n "$GLOBALS_LIB" ]; then
-        cp "$GLOBALS_LIB" "$DEPS_DIR/lib/absl/libglobals.pic.a"
+    # Find and install SwiftIR profiler library
+    # This is a monolithic ~42MB library with all TSL profiler dependencies
+    log_info "Installing SwiftIR profiler..."
+    PROFILER_PATH=$(find "$BUILD_DIR/xla-bazelisk-build" -name "libswiftir_profiler.so" -type f 2>/dev/null | head -1)
+    if [ -n "$PROFILER_PATH" ] && [ -f "$PROFILER_PATH" ]; then
+        cp "$PROFILER_PATH" "$DEPS_DIR/lib/"
+        log_success "SwiftIR profiler installed to $DEPS_DIR/lib/ ($(du -h "$PROFILER_PATH" | cut -f1))"
+    else
+        log_warn "SwiftIR profiler not found - build may have failed"
     fi
-
-    # Count copied libraries
-    XLA_PROTO_COUNT=$(ls "$DEPS_DIR/lib/xla/"*.a 2>/dev/null | wc -l)
-    PROTOBUF_COUNT=$(ls "$DEPS_DIR/lib/protobuf/"*.a 2>/dev/null | wc -l)
-    ABSL_COUNT=$(ls "$DEPS_DIR/lib/absl/"*.a 2>/dev/null | wc -l)
-    log_success "Copied $XLA_PROTO_COUNT XLA proto, $PROTOBUF_COUNT protobuf, $ABSL_COUNT absl libraries"
 
     # Copy PJRT headers
     mkdir -p "$DEPS_DIR/include/xla/pjrt/c"
     cp xla/pjrt/c/*.h "$DEPS_DIR/include/xla/pjrt/c/" 2>/dev/null || true
 
-    # Copy proto headers (all XLA .pb.h files)
-    log_info "Copying XLA proto headers..."
-    XLA_BIN=$(find "$BUILD_DIR/xla-bazelisk-build" -type d -name "k8-opt" -path "*/bazel-out/*" 2>/dev/null | head -1)
-    if [ -n "$XLA_BIN" ]; then
-        XLA_BIN="$XLA_BIN/bin"
-        find "$XLA_BIN" -name "*.pb.h" -path "*/xla/*" -exec sh -c '
-            FILE="$1"; XLA_BIN="$2"; DEPS="$3"
-            REL=$(echo "$FILE" | sed "s|$XLA_BIN/||")
-            mkdir -p "$DEPS/include/$(dirname $REL)"
-            cp "$FILE" "$DEPS/include/$REL"
-        ' _ {} "$XLA_BIN" "$DEPS_DIR" \; 2>/dev/null || true
-    fi
-
-    # Copy protobuf headers
-    log_info "Copying protobuf/absl headers..."
-    PROTOBUF_SRC=$(find "$BUILD_DIR/xla-bazelisk-build" -path "*/external/com_google_protobuf/src/google/protobuf" -type d 2>/dev/null | head -1)
-    if [ -n "$PROTOBUF_SRC" ]; then
-        mkdir -p "$DEPS_DIR/include/google"
-        cp -r "$PROTOBUF_SRC" "$DEPS_DIR/include/google/"
-    fi
-
-    # Copy abseil headers
-    ABSL_SRC=$(find "$BUILD_DIR/xla-bazelisk-build" -path "*/external/com_google_absl/absl" -type d 2>/dev/null | head -1)
-    if [ -n "$ABSL_SRC" ]; then
-        cp -r "$ABSL_SRC" "$DEPS_DIR/include/"
-    fi
-
-    log_success "XLA PJRT plugin and proto libraries built"
+    log_success "XLA PJRT plugin (with profiler + TraceMe) and SwiftIR profiler built"
 else
     log_info "Skipping XLA/PJRT build (--skip-xla)"
 fi
@@ -548,8 +499,97 @@ else
     log_warn "SwiftIR cmake directory not found at $SWIFTIR_CMAKE_DIR"
 fi
 
+# Note: SwiftIRProfiler (libswiftir_profiler.so) is built via Bazel
+# alongside the PJRT plugin and already installed above in step 7
+
 # ============================================================
-# 10. Summary
+# 10. Build PJRTProtoHelper and PJRTSimpleWrapper Libraries
+# ============================================================
+
+log_info "Building PJRTProtoHelper and PJRTSimpleWrapper shared libraries..."
+
+PJRT_CMAKE_DIR="$SCRIPT_DIR/../Sources/PJRTCWrappers"
+if [ -d "$PJRT_CMAKE_DIR" ]; then
+    cd "$PJRT_CMAKE_DIR"
+
+    # Clean any previous build
+    rm -rf build
+    mkdir -p build
+    cd build
+
+    # Configure and build
+    export SWIFTIR_DEPS_DIR="$DEPS_DIR"
+    cmake .. -DCMAKE_BUILD_TYPE=Release 2>&1 | tee cmake_config.log
+    if [ ${PIPESTATUS[0]} -eq 0 ]; then
+        cmake --build . --parallel $(nproc) 2>&1 | tee cmake_build.log
+        if [ ${PIPESTATUS[0]} -eq 0 ]; then
+            # Copy libraries to deps dir
+            if [ -f "libPJRTProtoHelper.so" ]; then
+                cp libPJRTProtoHelper.so "$DEPS_DIR/lib/"
+                log_success "PJRTProtoHelper built and installed to $DEPS_DIR/lib/"
+            else
+                log_warn "PJRTProtoHelper library not found after build"
+            fi
+            if [ -f "libPJRTSimpleWrapper.so" ]; then
+                cp libPJRTSimpleWrapper.so "$DEPS_DIR/lib/"
+                log_success "PJRTSimpleWrapper built and installed to $DEPS_DIR/lib/"
+            else
+                log_warn "PJRTSimpleWrapper library not found after build"
+            fi
+        else
+            log_warn "PJRT wrappers build failed - check $PJRT_CMAKE_DIR/build/cmake_build.log"
+        fi
+    else
+        log_warn "PJRT wrappers cmake configure failed - check $PJRT_CMAKE_DIR/build/cmake_config.log"
+    fi
+
+    cd "$SCRIPT_DIR"
+else
+    log_warn "PJRTCWrappers directory not found at $PJRT_CMAKE_DIR"
+fi
+
+# ============================================================
+# 11. Build JupyterMLIRWrapper Library
+# ============================================================
+
+log_info "Building JupyterMLIRWrapper shared library..."
+
+JUPYTER_CMAKE_DIR="$SCRIPT_DIR/../Sources/JupyterCWrappers"
+if [ -d "$JUPYTER_CMAKE_DIR" ]; then
+    cd "$JUPYTER_CMAKE_DIR"
+
+    # Clean any previous build
+    rm -rf build
+    mkdir -p build
+    cd build
+
+    # Configure and build (uses SWIFTIR_DEPS env var or default)
+    export SWIFTIR_DEPS="$DEPS_DIR"
+    cmake .. -DCMAKE_BUILD_TYPE=Release 2>&1 | tee cmake_config.log
+    if [ ${PIPESTATUS[0]} -eq 0 ]; then
+        cmake --build . --parallel $(nproc) 2>&1 | tee cmake_build.log
+        if [ ${PIPESTATUS[0]} -eq 0 ]; then
+            # Copy library to deps dir
+            if [ -f "libJupyterMLIRWrapper.so" ]; then
+                cp libJupyterMLIRWrapper.so "$DEPS_DIR/lib/"
+                log_success "JupyterMLIRWrapper built and installed to $DEPS_DIR/lib/"
+            else
+                log_warn "JupyterMLIRWrapper library not found after build"
+            fi
+        else
+            log_warn "JupyterMLIRWrapper build failed - check $JUPYTER_CMAKE_DIR/build/cmake_build.log"
+        fi
+    else
+        log_warn "JupyterMLIRWrapper cmake configure failed - check $JUPYTER_CMAKE_DIR/build/cmake_config.log"
+    fi
+
+    cd "$SCRIPT_DIR"
+else
+    log_warn "JupyterCWrappers directory not found at $JUPYTER_CMAKE_DIR"
+fi
+
+# ============================================================
+# 12. Summary
 # ============================================================
 
 echo ""

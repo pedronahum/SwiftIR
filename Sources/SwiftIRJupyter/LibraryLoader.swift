@@ -124,6 +124,7 @@ public enum SwiftIRJupyterError: Error, CustomStringConvertible {
     case mlirError(message: String)
     case pjrtError(code: Int32, message: String)
     case invalidState(message: String)
+    case initializationFailed(message: String)
 
     public var description: String {
         switch self {
@@ -139,6 +140,8 @@ public enum SwiftIRJupyterError: Error, CustomStringConvertible {
             return "PJRT error (\(code)): \(message)"
         case .invalidState(let message):
             return "Invalid state: \(message)"
+        case .initializationFailed(let message):
+            return "Initialization failed: \(message)"
         }
     }
 }

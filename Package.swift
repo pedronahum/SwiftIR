@@ -180,6 +180,11 @@ let package = Package(
             name: "SwiftIRJupyter",
             targets: ["SwiftIRJupyter"]
         ),
+        // TensorBoard/XProf profiling support
+        .library(
+            name: "SwiftIRProfiler",
+            targets: ["SwiftIRProfiler"]
+        ),
         // Examples
         .executable(
             name: "SimpleNN",
@@ -236,6 +241,18 @@ let package = Package(
         .executable(
             name: "JupyterFeatureParityTest",
             targets: ["JupyterFeatureParityTest"]
+        ),
+        .executable(
+            name: "ProfilerTest",
+            targets: ["ProfilerTest"]
+        ),
+        .executable(
+            name: "ProfilerDemo",
+            targets: ["ProfilerDemo"]
+        ),
+        .executable(
+            name: "JupyterProfiledSimulation",
+            targets: ["JupyterProfiledSimulation"]
         ),
     ],
     dependencies: [
@@ -410,6 +427,17 @@ let package = Package(
             name: "SwiftIRJupyter",
             dependencies: [],
             path: "Sources/SwiftIRJupyter"
+        ),
+
+        // MARK: - Profiling Support
+
+        // TensorBoard/XProf profiling via dlopen (works in Jupyter/Colab and native)
+        // Uses libSwiftIRProfiler.so built with CMake
+        // Also supports PJRT profiler extension for XLA internal metrics
+        .target(
+            name: "SwiftIRProfiler",
+            dependencies: ["PJRTCWrappers"],
+            path: "Sources/SwiftIRProfiler"
         ),
 
         // SPIR-V for Graphics/Compute
@@ -755,6 +783,45 @@ let package = Package(
             path: "Examples",
             exclude: ["README.md"],
             sources: ["JupyterFeatureParityTest.swift"]
+        ),
+
+        .executableTarget(
+            name: "ProfilerTest",
+            dependencies: ["SwiftIRProfiler"],
+            path: "Examples",
+            exclude: ["README.md"],
+            sources: ["ProfilerTest.swift"]
+        ),
+
+        .executableTarget(
+            name: "ProfilerDemo",
+            dependencies: [
+                "SwiftIRProfiler",
+                "SwiftIRXLA",
+                "SwiftIRCore",
+                "SwiftIRTypes",
+                "SwiftIRDialects",
+                "SwiftIRBuilders",
+                "SwiftIRStableHLO"
+            ],
+            path: "Examples",
+            exclude: ["README.md"],
+            sources: ["ProfilerDemo.swift"],
+            swiftSettings: [
+                .interoperabilityMode(.Cxx),
+                .unsafeFlags(allSwiftIncludePaths),
+            ]
+        ),
+
+        .executableTarget(
+            name: "JupyterProfiledSimulation",
+            dependencies: [
+                "SwiftIRJupyter",
+                "SwiftIRProfiler"
+            ],
+            path: "Examples",
+            exclude: ["README.md"],
+            sources: ["JupyterProfiledSimulation.swift"]
         ),
 
         .executableTarget(

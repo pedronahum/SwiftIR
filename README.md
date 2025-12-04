@@ -1,283 +1,153 @@
 # SwiftIR
 
-**Swift ML Compiler Infrastructure - Flexible Automatic Differentiation with Multiple Programming Paradigms**
+**Swift ML Compiler Infrastructure with Automatic Differentiation**
 
 [![Swift Version](https://img.shields.io/badge/swift-6.0-orange.svg)](https://swift.org)
 [![MLIR](https://img.shields.io/badge/MLIR-StableHLO-blue.svg)](https://github.com/openxla/stablehlo)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-300%2B%20passing-brightgreen.svg)]()
 
 ---
 
-## What is SwiftIR?
+## Overview
 
-SwiftIR is a flexible ML compiler infrastructure that uses Swift's compiler to build computation graphs with automatic differentiation. Because it leverages Swift's type system and `@differentiable` attribute, SwiftIR can naturally express **multiple programming paradigms**:
+SwiftIR compiles Swift code with automatic differentiation to XLA for hardware-accelerated execution. It traces computation graphs using Swift's type system and `@differentiable` attribute, generating StableHLO IR that runs on CPU, GPU, and TPU via PJRT.
+
+```
+Swift Code → Tracer → MLIR/StableHLO → XLA → CPU/GPU/TPU
+```
+
+---
+
+## Two Implementations
+
+| | **SwiftIR** | **SwiftIRJupyter** |
+|---|---|---|
+| **Backend** | C++ MLIR bindings | Pure Swift (string-based MLIR) |
+| **Tracer** | `DifferentiableTracer` | `JTracer` |
+| **Use case** | Production, local development | Jupyter/Colab, rapid prototyping |
+| **Dependencies** | MLIR C API | None (pure Swift) |
+
+Both use Swift's native `@differentiable` for automatic differentiation, produce identical StableHLO output, and share the same PJRT execution layer.
+
+---
+
+## Building Simulation with TensorBoard Profiling
+
+SwiftIR includes a real-world physics simulation: thermal dynamics of a radiant floor heating system. This demonstrates automatic differentiation through control flow, XLA loop fusion, and TensorBoard profiling.
+
+### SwiftIRJupyter Example
 
 ```swift
 import SwiftIRJupyter
+import SwiftIRProfiler
 
-// ═══════════════════════════════════════════════════════════════
-// PARADIGM 1: Functional Transformations
-// ═══════════════════════════════════════════════════════════════
+// Initialize backend and profiler
+try SwiftIRJupyter.shared.initialize()
+let profiler = try PJRTProfiler.create()
+try profiler.start()
 
-// Automatic batching with vmap
-let batchedForward = jVmap { x in model(x) }
+// Physics simulation with custom trace annotations
+for epoch in 0..<numEpochs {
+    try pjrtTrainStep(epoch) {
+        // Trace graph construction
+        try pjrtTraced("trace_simulation") {
+            let ctx = JTracingContext()
+            let dummy = ctx.input(shape: [], dtype: .float32)
 
-// Sequential operations with scan
-let (finalState, outputs) = jScan(rnnCell, initialState, sequence)
+            // Native while loop → stablehlo.while (O(1) compilation)
+            let (_, finalSlab, _, _) = jWhileLoop4(
+                initial: (iter, slabTemp, quantaTemp, tankTemp),
+                condition: { $0.0 < maxSteps },
+                body: { state in
+                    // Heat transfer: Tank (70C) → Fluid → Floor slab
+                    let conductance = one / (resistance * thickness / area)
+                    let heatToSlab = (state.2 - state.1) * conductance * dt
+                    let newSlab = state.1 + heatToSlab / (slabCp * slabMass)
+                    return (state.0 + 1, newSlab, newQuanta, newTank)
+                }
+            )
 
-// Functional PRNG
-let key = JPRNGKey(seed: 42)
-let weights = jRandomNormal(key, shape: [784, 256])
-
-// Tree-structured parameters
-let updated = jTreeZipWith(params, grads) { p, g in p - lr * g }
-
-// ═══════════════════════════════════════════════════════════════
-// PARADIGM 2: PyTorch/TensorFlow-Style Eager Operations
-// ═══════════════════════════════════════════════════════════════
-
-// Method chaining on tensors
-let output = input
-    .matmul(weights)
-    .relu()
-    .dropout(rate: 0.5)
-    .softmax()
-
-// Familiar tensor operations
-let loss = (predictions - targets).pow(2).mean()
-
-// ═══════════════════════════════════════════════════════════════
-// PARADIGM 3: Native Swift with @differentiable
-// ═══════════════════════════════════════════════════════════════
-
-@differentiable(reverse)
-func neuralNetwork(_ x: DifferentiableTracer) -> DifferentiableTracer {
-    var h = diffReLU(diffMatmul(x, w1) + b1)
-    h = diffReLU(diffMatmul(h, w2) + b2)
-    return diffSoftmax(diffMatmul(h, w3) + b3)
-}
-
-// Swift's native gradient computation
-let grad = gradient(at: params) { p in loss(model(p, x), y) }
-```
-
-**The key insight**: SwiftIR uses Swift's compiler to trace operations into a computation graph. This means any Swift code that uses `DifferentiableTracer` or `JTracer` automatically becomes a traceable, differentiable program - regardless of the programming style you prefer.
-
----
-
-## Why SwiftIR is Different
-
-### Compiler-Based Tracing
-
-Unlike frameworks that define their own DSL, SwiftIR leverages Swift's existing infrastructure:
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│ Your Swift Code (any paradigm)                                   │
-│ • JAX-style: jVmap, jScan, jCond                                │
-│ • Tensor-style: x.matmul(w).relu()                              │
-│ • Native Swift: @differentiable functions                        │
-└─────────────────────────────────────────────────────────────────┘
-                            ↓
-┌─────────────────────────────────────────────────────────────────┐
-│ Swift Compiler + DifferentiableTracer                            │
-│ • Swift's type system validates your code                        │
-│ • Swift's @differentiable generates gradient rules               │
-│ • Tracers capture operations into computation graph              │
-└─────────────────────────────────────────────────────────────────┘
-                            ↓
-┌─────────────────────────────────────────────────────────────────┐
-│ MLIR StableHLO                                                   │
-│ • Portable, versioned IR                                         │
-│ • Same format as JAX, TensorFlow, PyTorch/XLA                   │
-└─────────────────────────────────────────────────────────────────┘
-                            ↓
-┌─────────────────────────────────────────────────────────────────┐
-│ XLA Compilation + PJRT Execution                                 │
-│ • Industry-standard optimizations                                │
-│ • CPU, GPU (CUDA/ROCm), TPU                                     │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Flexibility Through Composition
-
-Because SwiftIR is built on Swift's type system, you can freely mix paradigms:
-
-```swift
-// Mix JAX-style vmap with tensor-style operations
-let batchedModel = jVmap { x in
-    x.matmul(weights).relu().softmax()  // Tensor-style inside vmap
-}
-
-// Use scan with @differentiable functions
-@differentiable(reverse)
-func rnnCell(_ h: JTracer, _ x: JTracer) -> (JTracer, JTracer) {
-    let newH = (h.matmul(Wh) + x.matmul(Wx)).tanh()
-    return (newH, newH)
-}
-let (final, outputs) = jScan(rnnCell, h0, inputs)
-
-// Tree operations work with any nested structure
-let model = JTuple2(first: encoder, second: decoder)
-let grads = jTreeMap(model) { param in computeGrad(param) }
-```
-
----
-
-## Supported Paradigms
-
-### Functional Transformations
-
-| Transformation | API | Description |
-|----------------|-----|-------------|
-| **vmap** | `jVmap`, `jVmap2`, `jVmap3` | Automatic vectorization/batching |
-| **scan** | `jScan`, `jCumsum`, `jCumprod` | Sequential operations (RNNs, time series) |
-| **cond** | `jCond`, `jSelect`, `jWhere` | Differentiable conditionals |
-| **PRNG** | `JPRNGKey`, `jRandomNormal` | Functional random number generation |
-| **DiffTree** | `JTree`, `jTreeMap`, `jTreeZipWith` | Tree-structured parameters |
-| **grad** | `jGrad`, `jValueAndGrad` | Reverse-mode automatic differentiation |
-
-### Tensor-Style Operations
-
-```swift
-// Arithmetic with broadcasting
-let z = x + y * 2.0
-
-// Method chaining
-let out = input.matmul(w).add(b).relu().dropout(rate: 0.1)
-
-// Reductions
-let mean = tensor.mean()
-let sum = tensor.sum(axis: 1)
-
-// Reshaping
-let reshaped = tensor.reshape([batch, -1])
-let transposed = tensor.transpose([0, 2, 1])
-```
-
-### Native Swift Differentiation
-
-```swift
-import _Differentiation
-
-@differentiable(reverse)
-func myModel(_ x: DifferentiableTracer) -> DifferentiableTracer {
-    // Write normal Swift code - it's automatically differentiable
-    let h1 = diffReLU(diffMatmul(x, w1))
-    let h2 = diffReLU(diffMatmul(h1, w2))
-    return diffSoftmax(diffMatmul(h2, w3))
-}
-
-// Use Swift's native gradient API
-let (value, grad) = valueWithGradient(at: params) { p in
-    loss(myModel(p, input), target)
-}
-```
-
----
-
-## Quick Start
-
-### Installation
-
-```bash
-git clone https://github.com/pedronahum/SwiftIR.git
-cd SwiftIR
-swift build
-swift test  # 300+ tests
-```
-
-### Google Colab / Jupyter
-
-SwiftIR works with [swift-jupyter](https://github.com/pedronahum/swift-jupyter) for interactive notebook development:
-
-```python
-# In a Colab notebook
-!curl -L https://github.com/pedronahum/SwiftIR/releases/latest/download/SwiftIR-linux-x86_64.tar.gz | tar xz -C /content
-%env LD_LIBRARY_PATH=/content/SwiftIR/lib
-```
-
-```swift
-// Then in a Swift cell
-import SwiftIRJupyter
-
-let x = JTracer(value: 1.0, shape: [2, 3])
-let y = x.matmul(weights).relu().softmax()
-```
-
----
-
-## Examples by Paradigm
-
-### JAX-Style: Batched Neural Network
-
-```swift
-// Define model
-func mlp(_ x: JTracer) -> JTracer {
-    var h = x.matmul(w1).relu()
-    h = h.matmul(w2).relu()
-    return h.matmul(w3).softmax()
-}
-
-// Batch it with vmap
-let batchedMLP = jVmap(mlp)
-let predictions = batchedMLP(batchedInputs)
-
-// Get gradients with tree operations
-let params = JTuple3(first: w1, second: w2, third: w3)
-let grads = jTreeMap(params) { p in computeGradient(p) }
-let updated = jTreeZipWith(params, grads) { p, g in p - 0.01 * g }
-```
-
-### Tensor-Style: Convolutional Network
-
-```swift
-func cnn(_ x: JTracer) -> JTracer {
-    x.conv2d(filters, stride: 2)
-     .batchNorm()
-     .relu()
-     .maxPool(size: 2)
-     .flatten()
-     .matmul(fc)
-     .softmax()
-}
-
-let loss = crossEntropy(cnn(images), labels)
-```
-
-### Native Swift: Physics Simulation
-
-```swift
-@differentiable(reverse)
-func simulate(_ params: DifferentiableTracer) -> DifferentiableTracer {
-    var state = initialState
-
-    // Use native while loop - compiles to stablehlo.while
-    let (_, finalState, _, _) = diffWhileLoop(
-        initial: (iteration, state, velocity, acceleration),
-        condition: { $0.0 < maxSteps },
-        body: { s in
-            let (newState, newVel) = physicsStep(s.1, s.2, params)
-            return (s.0 + 1, newState, newVel, s.3)
+            // Loss function
+            let loss = (finalSlab - target) * (finalSlab - target)
+            ctx.output(loss)
         }
-    )
 
-    return finalState
+        // Compile and execute
+        try pjrtTraced("xla_execution") {
+            let mlir = ctx.buildModule(name: "simulation")
+            let result = try SwiftIRJupyter.shared.execute(mlir)
+        }
+    }
 }
 
-// Gradient of simulation w.r.t. parameters
-let grad = gradient(at: params) { p in
-    let final = simulate(p)
+// Export profile for TensorBoard
+try profiler.stop()
+let data = try profiler.collectData()
+try PJRTProfiler.exportToFile(data, filepath: "/tmp/profile/host.xplane.pb")
+```
+
+### SwiftIR Example (Native @differentiable)
+
+```swift
+import SwiftIR
+import SwiftIRXLA
+import SwiftIRProfiler
+
+// Initialize PJRT and profiler
+let client = try PJRTCPUClient()
+let profiler = try PJRTProfiler.create()
+try profiler.start()
+
+// Native Swift differentiable function
+@differentiable(reverse)
+func simulateTimestep(
+    _ slab: DifferentiableTracer,
+    _ quanta: DifferentiableTracer,
+    _ tank: DifferentiableTracer
+) -> (DifferentiableTracer, DifferentiableTracer, DifferentiableTracer) {
+    let conductance = createConstant(1.0, shape: [], dtype: .float32) / resistance
+    let heatToSlab = (quanta - slab) * conductance * dt
+    return (slab + heatToSlab / slabCapacity, newQuanta, newTank)
+}
+
+// diffWhileLoop with gradient support
+let (_, finalState, _, _) = diffWhileLoop(
+    initial: (iteration, slabTemp, quantaTemp, tankTemp),
+    condition: { $0.0 < maxSteps },
+    body: { state in
+        let (s, q, t) = simulateTimestep(state.1, state.2, state.3)
+        return (state.0 + 1, s, q, t)
+    }
+)
+
+// Compute gradients through the entire simulation
+let grad = gradient(at: initialParams) { params in
+    let final = simulate(params)
     return (final - target).pow(2).sum()
 }
+
+// Export profile
+try profiler.stop()
+try PJRTProfiler.exportToFile(profiler.collectData(), filepath: "/tmp/profile/host.xplane.pb")
+```
+
+**Run examples and view in TensorBoard:**
+
+```bash
+# Run profiled simulation
+SWIFTIR_DEPS=/opt/swiftir-deps LD_LIBRARY_PATH=/opt/swiftir-deps/lib \
+  swift run JupyterProfiledSimulation
+
+# Launch TensorBoard
+tensorboard --logdir=/tmp/swiftir_jupyter_profile --port=6006
+# Open http://localhost:6006 → Profile tab
 ```
 
 ---
 
 ## Performance
 
-Performance benchmarks use a **thermal building simulation** from [PassiveLogic's Differentiable Swift benchmarks](https://passivelogic.com/blog/?post=benchmarking-differentiable-swift) - a real-world physics simulation with heat transfer equations running over many timesteps. This represents a practical ML/scientific computing workload rather than synthetic benchmarks.
+Benchmarks use the thermal building simulation (real physics, not synthetic):
 
 ### O(1) Compilation for Loops
 
@@ -287,99 +157,103 @@ Performance benchmarks use a **thermal building simulation** from [PassiveLogic'
 | 10,000 | 42ms | 4.2min | **6,002x** |
 | 100,000 | 43ms | ~42min | **59,523x** |
 
-SwiftIR's native `stablehlo.while` maintains constant compilation time regardless of iteration count.
+`stablehlo.while` maintains constant compilation time regardless of iteration count.
 
-### Low Gradient Overhead
+### Gradient Overhead
 
-| Framework | Gradient Overhead |
-|-----------|-------------------|
+| Framework | Overhead |
+|-----------|----------|
 | SwiftIR (XLA) | ~1.0x |
 | Standard Swift | 2.5-4.3x |
 
-XLA's operation fusion eliminates the typical overhead of reverse-mode AD.
+XLA's operation fusion eliminates typical reverse-mode AD overhead.
 
-### Comparison with JAX/TensorFlow
+---
 
-Direct performance comparisons with JAX and TensorFlow are planned but not yet completed. Both frameworks use the same XLA backend, so execution performance should be similar. The key differences are:
+## Installation
 
-- **Compilation**: SwiftIR benefits from Swift's type system catching errors at compile time
-- **Interoperability**: SwiftIR integrates natively with Swift/iOS/macOS ecosystems
-- **Python overhead**: SwiftIR avoids Python interpreter overhead for graph construction
+### Prerequisites
 
-See [Examples/BENCHMARK_RESULTS.md](Examples/BENCHMARK_RESULTS.md) for detailed benchmark methodology and results.
+- Swift 6.0+
+- Linux (Ubuntu 22.04+) or macOS
+
+### Build
+
+```bash
+git clone https://github.com/anthropics/SwiftIR.git
+cd SwiftIR
+
+# Install dependencies (Linux)
+./scripts/install-swiftir-ubuntu.sh
+
+# Build
+SWIFTIR_DEPS=/opt/swiftir-deps swift build
+
+# Test (300+ tests)
+SWIFTIR_DEPS=/opt/swiftir-deps swift test
+```
+
+### Google Colab
+
+```python
+!curl -L https://github.com/anthropics/SwiftIR/releases/download/latest/SwiftIR-linux-x86_64.tar.gz | tar xz
+%env LD_LIBRARY_PATH=/content/SwiftIR/lib
+```
+
+---
+
+## Supported Operations
+
+### Functional Transformations
+
+| Category | SwiftIR | SwiftIRJupyter | Description |
+|----------|---------|----------------|-------------|
+| **Vectorization** | `diffVmap`, `diffVmap2`, `diffVmap3` | `jVmap`, `jVmap2`, `jVmap3` | Automatic batching |
+| **Sequential** | `diffScan`, `diffCumsum`, `diffCumprod` | `jScan`, `jCumsum`, `jCumprod` | RNNs, time series |
+| **Control Flow** | `diffWhileLoop`, `diffCond` | `jWhileLoop`, `jCond` | Native loops → `stablehlo.while` |
+| **Gradients** | `gradient`, `valueWithGradient` | `jGrad`, `jValueAndGrad` | Reverse-mode AD |
+| **PRNG** | `DiffPRNGKey`, `diffRandomNormal` | `JPRNGKey`, `jRandomNormal` | Functional random |
+| **Tree Ops** | `diffTreeMap`, `diffTreeZipWith` | `jTreeMap`, `jTreeZipWith` | Nested parameter structures |
+
+### Tensor Operations (All Differentiable)
+
+| Category | Operations |
+|----------|------------|
+| **Arithmetic** | `+`, `-`, `*`, `/`, `pow`, `sqrt`, `rsqrt`, `abs`, `floor`, `ceil` |
+| **Activations** | `relu`, `leakyRelu`, `elu`, `selu`, `gelu`, `silu`, `mish`, `sigmoid`, `tanh`, `softplus`, `softmax`, `logSoftmax` |
+| **Trigonometric** | `sin`, `cos`, `tan`, `exp`, `log` |
+| **Matrix** | `matmul`, `transpose`, `reshape`, `slice`, `concatenate`, `broadcast` |
+| **Reductions** | `sum`, `mean`, `max`, `min`, `prod` (with axis support) |
+| **Comparisons** | `greater`, `greaterEqual`, `less`, `lessEqual`, `equal`, `notEqual` |
+| **Selection** | `select`, `where`, `clamp`, `maximum`, `minimum` |
+| **Creation** | `zeros`, `ones`, `full`, `zerosLike`, `onesLike` |
+| **Initialization** | `xavierUniform`, `xavierNormal`, `heUniform`, `heNormal`, `truncatedNormal` |
+
+### Profiling & Tracing
+
+| API | Description |
+|-----|-------------|
+| `PJRTProfiler.create()` | Create XLA profiler instance |
+| `pjrtTraced("name") { }` | Custom trace annotation |
+| `pjrtTrainStep(epoch) { }` | Step markers for TensorBoard Overview |
+| `PJRTProfiler.hasTraceMeApi` | Check if unified tracing available |
+
+All operations have gradient implementations validated by 300+ tests.
 
 ---
 
 ## Hardware Support
 
-```swift
-import SwiftIRRuntime
+| Hardware | Status | Notes |
+|----------|--------|-------|
+| CPU | Full support | Default backend |
+| TPU | Full support | Via libtpu.so |
+| GPU | Ready | Needs CUDA plugin |
 
-// Auto-detect best accelerator (TPU → GPU → CPU)
-let client = try PJRTClientFactory.create()
+```swift
+let client = try PJRTClientFactory.create()  // Auto-detect best accelerator
 RuntimeDetector.printInfo()
 ```
-
-| Hardware | Status | Plugin |
-|----------|--------|--------|
-| **CPU** | ✅ Full support | `pjrt_c_api_cpu_plugin.so` |
-| **TPU** | ✅ Full support | `libtpu.so` |
-| **GPU** | Ready (needs MLIR rebuild) | `xla_cuda_plugin.so` |
-
----
-
-## Two Implementations
-
-SwiftIR provides two parallel implementations to support different deployment scenarios:
-
-### SwiftIR (C++ Interop)
-- **Full MLIR toolchain** - Direct bindings to MLIR C API
-- **Swift's native `@differentiable`** - Leverages Swift's built-in AD infrastructure
-- **Best for**: Local development, production deployment, full compiler integration
-
-### SwiftIRJupyter (Pure Swift)
-- **No C++ dependencies** - Pure Swift implementation generates MLIR as strings
-- **PythonKit integration** - Smooth interaction with Jupyter kernel via [swift-jupyter](https://github.com/pedronahum/swift-jupyter)
-- **Colab-ready** - Run SwiftIR notebooks in Google Colab without complex setup
-- **Best for**: Interactive development, education, rapid prototyping
-
-```swift
-// Same API, different backends
-// SwiftIR (C++ interop)
-import SwiftIR
-let result = diffVmap { x in diffReLU(x) }
-
-// SwiftIRJupyter (pure Swift, Jupyter/Colab)
-import SwiftIRJupyter
-let result = jVmap { x in x.relu() }
-```
-
-**Why two implementations?**
-
-1. **Deployment flexibility**: SwiftIRJupyter can run anywhere Swift runs, without needing MLIR/XLA libraries installed locally. The MLIR is generated as text and can be compiled remotely.
-
-2. **Jupyter/Colab support**: SwiftIRJupyter integrates with [swift-jupyter](https://github.com/pedronahum/swift-jupyter) for interactive notebook development, making it easy to experiment with ML models in Google Colab.
-
-3. **Feature parity**: Both implementations produce identical MLIR output and support all paradigms. 177 feature parity tests ensure they stay in sync.
-
-4. **Incremental adoption**: Start with SwiftIRJupyter for prototyping, then switch to SwiftIR for production when you need full MLIR toolchain access.
-
----
-
-## Complete Operation Coverage
-
-### 80+ Differentiable Operations
-
-**Arithmetic**: add, subtract, multiply, divide, power, sqrt, rsqrt
-**Activations**: relu, leakyRelu, elu, selu, gelu, silu, mish, sigmoid, tanh, softplus, softmax
-**Matrix**: matmul, transpose, reshape, flatten, concat, slice
-**Reductions**: sum, mean, max, min, prod
-**Convolutions**: conv2d, maxPool, avgPool
-**Normalization**: batchNorm, layerNorm
-**Loss**: mse, crossEntropy, binaryCrossEntropy, huber, klDivergence
-**Control Flow**: while, cond, select, where
-
-All operations have complete gradient implementations validated by 300+ tests.
 
 ---
 
@@ -387,62 +261,27 @@ All operations have complete gradient implementations validated by 300+ tests.
 
 ```
 Sources/
-├── SwiftIRJupyter/          # Pure Swift implementation
-│   ├── JupyterSymbolicAD.swift  # Core tracer
-│   ├── JupyterVmap.swift        # vmap transformation
-│   ├── JupyterScan.swift        # scan transformation
-│   ├── JupyterCond.swift        # conditionals
-│   ├── JupyterPRNG.swift        # functional PRNG
-│   ├── JupyterTree.swift        # tree operations
-│   └── JupyterCompiler.swift    # MLIR generation
-│
-├── SwiftIR/                 # C++ interop version
-│   └── SymbolicAD/              # Same features, different backend
-│
-└── SwiftIRRuntime/          # Hardware detection
+├── SwiftIR/              # C++ MLIR bindings, @differentiable
+├── SwiftIRJupyter/       # Pure Swift, JTracer
+├── SwiftIRProfiler/      # TensorBoard profiling integration
+├── SwiftIRXLA/           # PJRT client, XLA execution
+└── SwiftIRRuntime/       # Hardware detection
+
+Examples/
+├── JupyterProfiledSimulation.swift    # Full example: Jupyter + profiling
+├── JupyterBuildingSimulationFull.swift # Physics simulation (Jupyter)
+├── BuildingSimulation_SwiftIR.swift   # Physics simulation (native)
+└── ProfilerDemo.swift                 # Standalone profiler demo
 ```
-
----
-
-## Roadmap
-
-See [ROADMAP.md](ROADMAP.md) for details.
-
-### Completed
-- ✅ Automatic differentiation (300+ tests)
-- ✅ Functional transformations (vmap, scan, cond, PRNG, DiffTree)
-- ✅ Tensor-style operations
-- ✅ Native Swift @differentiable support
-- ✅ CPU and TPU execution
-- ✅ SwiftIRJupyter (177 feature parity tests)
-
-### Next Priorities
-- Higher-order differentiation (Hessians, JVPs)
-- Gradient checkpointing
-- Shape-typed tensors (compile-time shape checking)
-
----
-
-## Contributing
-
-Contributions welcome! Priority areas:
-1. **Testing**: More test coverage
-2. **Operations**: New differentiable ops
-3. **Documentation**: Tutorials and examples
-4. **GPU**: Testing when MLIR is rebuilt
 
 ---
 
 ## License
 
-Apache 2.0 License. See [LICENSE](LICENSE) for details.
-
-## Author
-
-**Pedro Nahum** ([@pedronahum](https://github.com/pedronahum))
+Apache 2.0 License. See [LICENSE](LICENSE).
 
 ---
 
-**SwiftIR: Flexible ML compiler infrastructure in Swift - Multiple paradigms, one powerful foundation.**
+**SwiftIR**: Swift → StableHLO → XLA → Hardware
 
-*Built with Swift 6.0 | Powered by MLIR, StableHLO, and XLA*
+*Built with Swift 6.0 | Powered by MLIR and XLA*

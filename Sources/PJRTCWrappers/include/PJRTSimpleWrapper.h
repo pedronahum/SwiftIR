@@ -200,6 +200,67 @@ SW_PJRT_Error_Code PJRT_ExecuteWrapper(
     size_t* out_num_outputs
 );
 
+//===------------------------------------------------------------------===//
+// Profiler Extension API
+//===------------------------------------------------------------------===//
+
+/// Check if the loaded plugin has a profiler extension
+/// Returns true if profiler extension is available
+bool PJRT_HasProfilerExtension(void);
+
+/// Get the profiler API from the extension (if available)
+/// Returns NULL if no profiler extension
+void* PJRT_GetProfilerApi(void);
+
+/// Create a profiler using the PJRT profiler extension
+/// options is a serialized ProfileOptions protobuf (can be NULL for defaults)
+/// Returns SW_PJRT_Error_OK on success
+SW_PJRT_Error_Code PJRT_ProfilerCreate(
+    const char* options,
+    size_t options_size,
+    void** out_profiler
+);
+
+/// Start profiling
+SW_PJRT_Error_Code PJRT_ProfilerStart(void* profiler);
+
+/// Stop profiling
+SW_PJRT_Error_Code PJRT_ProfilerStop(void* profiler);
+
+/// Collect profiler data (XSpace protobuf)
+/// First call with buffer=NULL to get size, then call again with allocated buffer
+SW_PJRT_Error_Code PJRT_ProfilerCollectData(
+    void* profiler,
+    uint8_t* buffer,
+    size_t* buffer_size
+);
+
+/// Destroy a profiler
+SW_PJRT_Error_Code PJRT_ProfilerDestroy(void* profiler);
+
+//===------------------------------------------------------------------===//
+// TraceMe API (for unified Swift/XLA tracing)
+//===------------------------------------------------------------------===//
+
+/// Check if the plugin has TraceMe API available
+/// Returns true if TraceMe functions are available
+bool PJRT_HasTraceMeApi(void);
+
+/// Start a TraceMe activity. Returns activity_id (or 0 if tracing disabled).
+/// The activity_id is used to pair start/end events in the trace.
+/// level: 1 = critical (always shown), 2 = info, 3 = verbose
+int64_t PJRT_TraceMeStart(const char* name, int32_t level);
+
+/// End a TraceMe activity started by PJRT_TraceMeStart.
+void PJRT_TraceMeStop(int64_t activity_id);
+
+/// Check if tracing is active at the given level.
+/// Useful to avoid expensive string operations when tracing is disabled.
+bool PJRT_TraceMeActive(int32_t level);
+
+/// Record an instant event (no duration, just a point in time).
+void PJRT_TraceMeInstant(const char* name, int32_t level);
+
 #ifdef __cplusplus
 }
 #endif
