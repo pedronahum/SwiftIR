@@ -1,0 +1,4 @@
+module CPJRTDirect {
+    header "PJRTDirect.h"
+    export *
+}

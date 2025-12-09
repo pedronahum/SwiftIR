@@ -1,0 +1,51 @@
+module @main_module attributes {mhlo.num_partitions = 1 : i32, mhlo.num_replicas = 1 : i32} {
+  func.func @main(%arg0: tensor<1000xf32>) -> (tensor<1000xf32>, tensor<1000xf32>) {
+    %v0 = constant dense<1.000000e+02> : tensor<f32>
+    %v1 = broadcast_in_dim %v0, dims = [] : (tensor<f32>) -> tensor<1000xf32>
+    %v2 = constant dense<5.000000e-02> : tensor<f32>
+    %v3 = broadcast_in_dim %v2, dims = [] : (tensor<f32>) -> tensor<1000xf32>
+    %v4 = constant dense<1.000000e+00> : tensor<f32>
+    %v5 = broadcast_in_dim %v4, dims = [] : (tensor<f32>) -> tensor<1000xf32>
+    %v6 = constant dense<2.000000e-01> : tensor<f32>
+    %v7 = broadcast_in_dim %v6, dims = [] : (tensor<f32>) -> tensor<1000xf32>
+    %v8 = sqrt %v5 : tensor<1000xf32>
+    %v9 = multiply %v7, %v8 : tensor<1000xf32>
+    %v10 = divide %arg0, %v1 : tensor<1000xf32>
+    %v11 = log %v10 : tensor<1000xf32>
+    %v12 = constant dense<5.000000e-01> : tensor<f32>
+    %v13 = broadcast_in_dim %v12, dims = [] : (tensor<f32>) -> tensor<1000xf32>
+    %v14 = multiply %v7, %v7 : tensor<1000xf32>
+    %v15 = multiply %v14, %v13 : tensor<1000xf32>
+    %v16 = add %v3, %v15 : tensor<1000xf32>
+    %v18 = add %v11, %v16 : tensor<1000xf32>
+    %v19 = divide %v18, %v9 : tensor<1000xf32>
+    %v20 = subtract %v19, %v9 : tensor<1000xf32>
+    %v21 = negate %v3 : tensor<1000xf32>
+    %v23 = exp %v21 : tensor<1000xf32>
+    %v24 = constant dense<1.702000e+00> : tensor<f32>
+    %v25 = broadcast_in_dim %v24, dims = [] : (tensor<f32>) -> tensor<1000xf32>
+    %v26 = multiply %v19, %v25 : tensor<1000xf32>
+    %v27 = logistic %v26 : tensor<1000xf32>
+    %v28 = multiply %v20, %v25 : tensor<1000xf32>
+    %v29 = logistic %v28 : tensor<1000xf32>
+    %v30 = multiply %arg0, %v27 : tensor<1000xf32>
+    %v31 = multiply %v1, %v23 : tensor<1000xf32>
+    %v32 = multiply %v31, %v29 : tensor<1000xf32>
+    %v33 = subtract %v30, %v32 : tensor<1000xf32>
+    %v36 = negate %v5 : tensor<1000xf32>
+    %v38 = multiply %v36, %v31 : tensor<1000xf32>
+    %v43 = multiply %v38, %v29 : tensor<1000xf32>
+    %v44 = subtract %v5, %v29 : tensor<1000xf32>
+    %v45 = multiply %v43, %v44 : tensor<1000xf32>
+    %v46 = multiply %v45, %v25 : tensor<1000xf32>
+    %v51 = subtract %v5, %v27 : tensor<1000xf32>
+    %v52 = multiply %v30, %v51 : tensor<1000xf32>
+    %v53 = multiply %v52, %v25 : tensor<1000xf32>
+    %v56 = add %v46, %v53 : tensor<1000xf32>
+    %v57 = divide %v56, %v9 : tensor<1000xf32>
+    %v62 = divide %v57, %v10 : tensor<1000xf32>
+    %v63 = divide %v62, %v1 : tensor<1000xf32>
+    %v68 = add %v63, %v27 : tensor<1000xf32>
+    return %v33, %v68 : tensor<1000xf32>, tensor<1000xf32>
+  }
+}

@@ -12,6 +12,7 @@ env:
   LLVM_COMMIT: a6d7828f4c50c1ec7b0b5f61fe59d7a768175dcc
   STABLEHLO_VERSION: v1.0.0
   XLA_COMMIT: main
+  SHARDY_COMMIT: main
 
 jobs:
   build-dependencies:
@@ -259,8 +260,10 @@ jobs:
           # Build patched PJRT plugin (with profiler extension + TraceMe API) and SwiftIR profiler
           # - pjrt_c_api_cpu_plugin_profiler.so: CPU plugin with profiler extension and TraceMe API
           # - libswiftir_profiler.so: Standalone profiler (~42MB) for fallback/legacy use
+          # Note: --check_visibility=false is required because plugin_tracer_impl is internal to XLA
           bazelisk --output_user_root=~/swiftir-build/xla-bazelisk-build \
-            build //pjrt_cpu:pjrt_c_api_cpu_plugin_profiler.so \
+            build --check_visibility=false \
+                  //pjrt_cpu:pjrt_c_api_cpu_plugin_profiler.so \
                   //swiftir:libswiftir_profiler.so
 
       - name: Install PJRT Plugin and SwiftIR Profiler
@@ -296,6 +299,78 @@ jobs:
           echo ""
           echo "Installed libraries:"
           ls -la /opt/swiftir-deps/lib/*.so 2>/dev/null || true
+
+      # ============================================================
+      # 4.5. Build Shardy (SDY Sharding Dialect)
+      # ============================================================
+
+      - name: Clone Shardy
+        run: |
+          cd ~/swiftir-build
+          git clone https://github.com/openxla/shardy.git
+          cd shardy
+          git checkout ${{ env.SHARDY_COMMIT }}
+
+      - name: Build Shardy
+        run: |
+          cd ~/swiftir-build/shardy
+
+          # Build Shardy C API and sdy_opt tool
+          # Use PATH without swiftly to avoid clang conflicts
+          # --check_visibility=false in case internal deps have restricted visibility
+          PATH=/usr/bin:/bin:/usr/local/bin bazelisk build -c opt \
+            --lockfile_mode=error \
+            --check_visibility=false \
+            --features=-parse_headers \
+            --features=-layering_check \
+            //shardy/integrations/c:sdy_capi \
+            //shardy/tools:sdy_opt
+
+      - name: Install Shardy
+        run: |
+          cd ~/swiftir-build/shardy
+          BAZEL_BIN=$(bazelisk info bazel-bin 2>/dev/null || echo "bazel-bin")
+
+          # Install sdy_opt tool
+          if [ -f "$BAZEL_BIN/shardy/tools/sdy_opt" ]; then
+            cp "$BAZEL_BIN/shardy/tools/sdy_opt" /opt/swiftir-deps/bin/
+            chmod +x /opt/swiftir-deps/bin/sdy_opt
+            echo "✅ sdy_opt installed"
+          else
+            echo "⚠️ sdy_opt not found, searching..."
+            find . -name "sdy_opt" -type f 2>/dev/null | head -5
+          fi
+
+          # Install Shardy C API library
+          if [ -f "$BAZEL_BIN/shardy/integrations/c/libsdy_capi.so" ]; then
+            cp "$BAZEL_BIN/shardy/integrations/c/libsdy_capi.so" /opt/swiftir-deps/lib/
+            echo "✅ libsdy_capi.so installed"
+          else
+            # Try to find it
+            SDY_LIB=$(find . -name "libsdy_capi.so" -type f 2>/dev/null | head -1)
+            if [ -n "$SDY_LIB" ]; then
+              cp "$SDY_LIB" /opt/swiftir-deps/lib/
+              echo "✅ libsdy_capi.so installed from $SDY_LIB"
+            else
+              echo "⚠️ libsdy_capi.so not found"
+            fi
+          fi
+
+          # Copy Shardy headers
+          mkdir -p /opt/swiftir-deps/include/shardy
+          cp -r shardy/dialect /opt/swiftir-deps/include/shardy/ 2>/dev/null || true
+          cp -r shardy/integrations/c/*.h /opt/swiftir-deps/include/shardy/ 2>/dev/null || true
+
+          echo ""
+          echo "Shardy installation complete:"
+          ls -la /opt/swiftir-deps/bin/sdy_opt 2>/dev/null || echo "sdy_opt not installed"
+          ls -la /opt/swiftir-deps/lib/libsdy_capi.so 2>/dev/null || echo "libsdy_capi.so not installed"
+
+          # Clean up Shardy build to free disk space
+          echo "Cleaning up Shardy build directory..."
+          cd ~/swiftir-build
+          rm -rf shardy
+          df -h
 
       # ============================================================
       # 5. Build SwiftIRMLIR Library
@@ -561,6 +636,11 @@ jobs:
           ### XLA PJRT Plugin
           - **Commit:** ${{ env.XLA_COMMIT }}
           - **Plugin:** pjrt_c_api_cpu_plugin.so
+
+          ### Shardy (SDY Sharding Dialect)
+          - **Commit:** ${{ env.SHARDY_COMMIT }}
+          - **Library:** libsdy_capi.so
+          - **Tool:** sdy_opt
 
           ## SwiftIR Build
           - **Main Package:** Built successfully

@@ -121,6 +121,32 @@ else
     else
         warning "    XLA headers not found"
     fi
+
+    # Check Shardy (SDY Sharding Dialect)
+    echo ""
+    echo "  Shardy (SDY):"
+    if [ -f "$DEPS_DIR/lib/libsdy_capi.so" ]; then
+        size=$(du -h "$DEPS_DIR/lib/libsdy_capi.so" | cut -f1)
+        success "    libsdy_capi.so ($size)"
+    else
+        warning "    libsdy_capi.so not found (optional - for sharded execution)"
+    fi
+
+    if [ -f "$DEPS_DIR/bin/sdy_opt" ]; then
+        success "    sdy_opt available"
+        # Try to get version info
+        if "$DEPS_DIR/bin/sdy_opt" --help 2>&1 | head -1 | grep -q "sdy"; then
+            success "    sdy_opt executable works"
+        fi
+    else
+        warning "    sdy_opt not found (optional - for sharding transformations)"
+    fi
+
+    if [ -d "$DEPS_DIR/include/shardy" ]; then
+        success "    Shardy headers present"
+    else
+        warning "    Shardy headers not found"
+    fi
 fi
 
 echo ""

@@ -1,0 +1,4 @@
+module SdyCAPIWrapper {
+    header "SdyCAPIWrapper.h"
+    export *
+}

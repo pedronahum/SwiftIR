@@ -355,7 +355,7 @@ public func jXavierUniform(
 
     let fanIn = Float(dims[dims.count - 2])
     let fanOut = Float(dims[dims.count - 1])
-    let limit = sqrt(6.0 / (fanIn + fanOut))
+    let limit = (6.0 / (fanIn + fanOut)).squareRoot()
 
     let uniform = jRandomUniform(key, shape: shape, dtype: dtype)
     let scale = JTracer(value: Double(2 * limit), shape: JTensorShape([1]), dtype: dtype)
@@ -379,7 +379,7 @@ public func jXavierNormal(
 
     let fanIn = Float(dims[dims.count - 2])
     let fanOut = Float(dims[dims.count - 1])
-    let stddev = sqrt(2.0 / (fanIn + fanOut))
+    let stddev = (2.0 / (fanIn + fanOut)).squareRoot()
 
     return jRandomNormal(key, shape: shape, mean: 0, stddev: stddev, dtype: dtype)
 }
@@ -398,7 +398,7 @@ public func jHeUniform(
     precondition(dims.count >= 2, "He init requires at least 2D tensor")
 
     let fanIn = Float(dims[dims.count - 2])
-    let limit = sqrt(6.0 / fanIn)
+    let limit = (6.0 / fanIn).squareRoot()
 
     let uniform = jRandomUniform(key, shape: shape, dtype: dtype)
     let scale = JTracer(value: Double(2 * limit), shape: JTensorShape([1]), dtype: dtype)
@@ -421,7 +421,7 @@ public func jHeNormal(
     precondition(dims.count >= 2, "He init requires at least 2D tensor")
 
     let fanIn = Float(dims[dims.count - 2])
-    let stddev = sqrt(2.0 / fanIn)
+    let stddev = (2.0 / fanIn).squareRoot()
 
     return jRandomNormal(key, shape: shape, mean: 0, stddev: stddev, dtype: dtype)
 }

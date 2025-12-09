@@ -196,6 +196,19 @@ if [ -d "$DEPS_DIR" ]; then
     else
         warning "PJRT CPU plugin not found in $DEPS_DIR (will be built by install script)"
     fi
+
+    # Check Shardy - warning only, install script builds this
+    if [ -f "$DEPS_DIR/lib/libsdy_capi.so" ]; then
+        success "Shardy (SDY) installed"
+    else
+        warning "Shardy not found in $DEPS_DIR (optional - will be built by install script)"
+    fi
+
+    if [ -f "$DEPS_DIR/bin/sdy_opt" ]; then
+        success "sdy_opt tool installed"
+    else
+        warning "sdy_opt not found in $DEPS_DIR (optional - will be built by install script)"
+    fi
 else
     warning "Dependencies directory not found: $DEPS_DIR (will be created by install script)"
 fi

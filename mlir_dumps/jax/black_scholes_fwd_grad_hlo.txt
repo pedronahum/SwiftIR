@@ -1,0 +1,98 @@
+HloModule jit_price_and_delta_explicit, is_scheduled=true, entry_computation_layout={(f32[1000]{0})->(f32[1000]{0}, f32[1000]{0})}, allow_spmd_sharding_propagation_to_parameters={true}, allow_spmd_sharding_propagation_to_output={true,true}
+
+%fused_computation (param_0: f32[1000], param_1.3: f32[1000], param_2.5: f32[1000]) -> f32[1000] {
+  %param_0 = f32[1000]{0} parameter(0)
+  %param_2.5 = f32[1000]{0} parameter(2)
+  %constant.18 = f32[] constant(1)
+  %broadcast.15 = f32[1000]{0} broadcast(%constant.18), dimensions={}
+  %sub.1 = f32[1000]{0} subtract(%broadcast.15, %param_2.5), metadata={op_name="jit(price_and_delta_explicit)/jvp()/sub" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=43 source_end_line=43 source_column=11 source_end_column=36}
+  %mul.4 = f32[1000]{0} multiply(%param_2.5, %sub.1), metadata={op_name="jit(price_and_delta_explicit)/jvp()/mul" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=43 source_end_line=43 source_column=11 source_end_column=36}
+  %constant.14 = f32[] constant(-161.899261)
+  %broadcast.11 = f32[1000]{0} broadcast(%constant.14), dimensions={}, metadata={op_name="jit(price_and_delta_explicit)/transpose(jvp())/mul" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=43 source_end_line=43 source_column=26 source_end_column=35}
+  %mul.3 = f32[1000]{0} multiply(%mul.4, %broadcast.11), metadata={op_name="jit(price_and_delta_explicit)/transpose(jvp())/mul" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=43 source_end_line=43 source_column=26 source_end_column=35}
+  %param_1.3 = f32[1000]{0} parameter(1)
+  %sub.0 = f32[1000]{0} subtract(%broadcast.15, %param_0), metadata={op_name="jit(price_and_delta_explicit)/jvp()/sub" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=43 source_end_line=43 source_column=11 source_end_column=36}
+  %mul.2 = f32[1000]{0} multiply(%param_0, %sub.0), metadata={op_name="jit(price_and_delta_explicit)/jvp()/mul" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=43 source_end_line=43 source_column=11 source_end_column=36}
+  %mul.1 = f32[1000]{0} multiply(%param_1.3, %mul.2), metadata={op_name="jit(price_and_delta_explicit)/transpose(jvp())/mul" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=43 source_end_line=43 source_column=11 source_end_column=36}
+  %constant.15 = f32[] constant(1.702)
+  %broadcast.12 = f32[1000]{0} broadcast(%constant.15), dimensions={}
+  %mul.0 = f32[1000]{0} multiply(%mul.1, %broadcast.12), metadata={op_name="jit(price_and_delta_explicit)/transpose(jvp())/mul" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=43 source_end_line=43 source_column=26 source_end_column=35}
+  %add_any.1 = f32[1000]{0} add(%mul.3, %mul.0), metadata={op_name="jit(price_and_delta_explicit)/transpose(jvp())/add_any" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=43 source_end_line=43 source_column=26 source_end_column=35}
+  %constant.16 = f32[] constant(5)
+  %broadcast.13 = f32[1000]{0} broadcast(%constant.16), dimensions={}
+  %multiply.9 = f32[1000]{0} multiply(%add_any.1, %broadcast.13), metadata={op_name="jit(price_and_delta_explicit)/transpose(jvp())/div" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=78 source_end_line=78 source_column=9 source_end_column=33}
+  %constant.17 = f32[] constant(0.01)
+  %broadcast.14 = f32[1000]{0} broadcast(%constant.17), dimensions={}
+  %multiply.10 = f32[1000]{0} multiply(%param_1.3, %broadcast.14), metadata={op_name="jit(price_and_delta_explicit)/jvp()/div" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=76 source_end_line=76 source_column=21 source_end_column=35}
+  %div.0 = f32[1000]{0} divide(%multiply.9, %multiply.10), metadata={op_name="jit(price_and_delta_explicit)/transpose(jvp())/div" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=76 source_end_line=76 source_column=13 source_end_column=36}
+  %multiply.8 = f32[1000]{0} multiply(%div.0, %broadcast.14), metadata={op_name="jit(price_and_delta_explicit)/transpose(jvp())/div" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=76 source_end_line=76 source_column=21 source_end_column=35}
+  ROOT %add_any.0 = f32[1000]{0} add(%param_0, %multiply.8), metadata={op_name="jit(price_and_delta_explicit)/transpose(jvp())/add_any" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=76 source_end_line=76 source_column=21 source_end_column=35}
+}
+
+%fused_computation.1 (param_0.2: f32[1000], param_1.6: f32[1000], param_2.8: f32[1000]) -> f32[1000] {
+  %param_1.6 = f32[1000]{0} parameter(1)
+  %param_2.8 = f32[1000]{0} parameter(2)
+  %mul.7 = f32[1000]{0} multiply(%param_1.6, %param_2.8), metadata={op_name="jit(price_and_delta_explicit)/jvp()/mul" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=85 source_end_line=85 source_column=11 source_end_column=22}
+  %param_0.2 = f32[1000]{0} parameter(0)
+  %constant.19 = f32[] constant(95.1229477)
+  %mul.6 = f32[1000]{0} broadcast(%constant.19), dimensions={}, metadata={op_name="jit(price_and_delta_explicit)/jvp()/mul" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=85 source_end_line=85 source_column=25 source_end_column=42}
+  %mul.5 = f32[1000]{0} multiply(%param_0.2, %mul.6), metadata={op_name="jit(price_and_delta_explicit)/jvp()/mul" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=85 source_end_line=85 source_column=25 source_end_column=42}
+  ROOT %sub.2 = f32[1000]{0} subtract(%mul.7, %mul.5), metadata={op_name="jit(price_and_delta_explicit)/jvp()/sub" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=85 source_end_line=85 source_column=11 source_end_column=22}
+}
+
+%fused_computation.2 (param_0.4: f32[1000]) -> f32[1000] {
+  %constant.24 = f32[] constant(1)
+  %broadcast.19 = f32[1000]{0} broadcast(%constant.24), dimensions={}
+  %param_0.4 = f32[1000]{0} parameter(0)
+  %constant.23 = f32[] constant(0.07)
+  %add.8 = f32[1000]{0} broadcast(%constant.23), dimensions={}, metadata={op_name="jit(price_and_delta_explicit)/jvp()/add" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=78 source_end_line=78 source_column=10 source_end_column=24}
+  %add.3 = f32[1000]{0} add(%param_0.4, %add.8), metadata={op_name="jit(price_and_delta_explicit)/jvp()/add" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=78 source_end_line=78 source_column=10 source_end_column=24}
+  %constant.22 = f32[] constant(5)
+  %broadcast.18 = f32[1000]{0} broadcast(%constant.22), dimensions={}
+  %multiply.11 = f32[1000]{0} multiply(%add.3, %broadcast.18), metadata={op_name="jit(price_and_delta_explicit)/jvp()/div" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=78 source_end_line=78 source_column=9 source_end_column=33}
+  %constant.21 = f32[] constant(-0.2)
+  %broadcast.17 = f32[1000]{0} broadcast(%constant.21), dimensions={}
+  %add.2 = f32[1000]{0} add(%multiply.11, %broadcast.17), metadata={op_name="jit(price_and_delta_explicit)/jvp()/sub" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=79 source_end_line=79 source_column=9 source_end_column=19}
+  %constant.20 = f32[] constant(1.702)
+  %broadcast.16 = f32[1000]{0} broadcast(%constant.20), dimensions={}
+  %mul.8 = f32[1000]{0} multiply(%add.2, %broadcast.16), metadata={op_name="jit(price_and_delta_explicit)/jvp()/mul" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=43 source_end_line=43 source_column=26 source_end_column=35}
+  %neg.0 = f32[1000]{0} negate(%mul.8), metadata={op_name="jit(price_and_delta_explicit)/jvp()/neg" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=43 source_end_line=43 source_column=11 source_end_column=36}
+  %exp.0 = f32[1000]{0} exponential(%neg.0), metadata={op_name="jit(price_and_delta_explicit)/jvp()/exp" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=43 source_end_line=43 source_column=11 source_end_column=36}
+  %add.1 = f32[1000]{0} add(%exp.0, %broadcast.19), metadata={op_name="jit(price_and_delta_explicit)/jvp()/add" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=43 source_end_line=43 source_column=11 source_end_column=36}
+  ROOT %div.1 = f32[1000]{0} divide(%broadcast.19, %add.1), metadata={op_name="jit(price_and_delta_explicit)/jvp()/div" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=43 source_end_line=43 source_column=11 source_end_column=36}
+}
+
+%fused_computation.3 (param_0.6: f32[1000]) -> f32[1000] {
+  %constant.27 = f32[] constant(1)
+  %broadcast.21 = f32[1000]{0} broadcast(%constant.27), dimensions={}
+  %param_0.6 = f32[1000]{0} parameter(0)
+  %constant.26 = f32[] constant(0.07)
+  %add.11 = f32[1000]{0} broadcast(%constant.26), dimensions={}, metadata={op_name="jit(price_and_delta_explicit)/jvp()/add" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=78 source_end_line=78 source_column=10 source_end_column=24}
+  %add.10 = f32[1000]{0} add(%param_0.6, %add.11), metadata={op_name="jit(price_and_delta_explicit)/jvp()/add" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=78 source_end_line=78 source_column=10 source_end_column=24}
+  %constant.25 = f32[] constant(8.51)
+  %broadcast.20 = f32[1000]{0} broadcast(%constant.25), dimensions={}, metadata={op_name="jit(price_and_delta_explicit)/jvp()/mul" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=43 source_end_line=43 source_column=26 source_end_column=35}
+  %mul.9 = f32[1000]{0} multiply(%add.10, %broadcast.20), metadata={op_name="jit(price_and_delta_explicit)/jvp()/mul" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=43 source_end_line=43 source_column=26 source_end_column=35}
+  %neg.1 = f32[1000]{0} negate(%mul.9), metadata={op_name="jit(price_and_delta_explicit)/jvp()/neg" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=43 source_end_line=43 source_column=11 source_end_column=36}
+  %exp.1 = f32[1000]{0} exponential(%neg.1), metadata={op_name="jit(price_and_delta_explicit)/jvp()/exp" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=43 source_end_line=43 source_column=11 source_end_column=36}
+  %add.9 = f32[1000]{0} add(%exp.1, %broadcast.21), metadata={op_name="jit(price_and_delta_explicit)/jvp()/add" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=43 source_end_line=43 source_column=11 source_end_column=36}
+  ROOT %div.2 = f32[1000]{0} divide(%broadcast.21, %add.9), metadata={op_name="jit(price_and_delta_explicit)/jvp()/div" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=43 source_end_line=43 source_column=11 source_end_column=36}
+}
+
+%fused_computation.4 (param_0.8: f32[1000]) -> f32[1000] {
+  %param_0.8 = f32[1000]{0} parameter(0)
+  %constant.28 = f32[] constant(0.01)
+  %broadcast.22 = f32[1000]{0} broadcast(%constant.28), dimensions={}
+  %multiply.12 = f32[1000]{0} multiply(%param_0.8, %broadcast.22), metadata={op_name="jit(price_and_delta_explicit)/jvp()/div" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=76 source_end_line=76 source_column=21 source_end_column=35}
+  ROOT %log.0 = f32[1000]{0} log(%multiply.12), metadata={op_name="jit(price_and_delta_explicit)/jvp()/log" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=76 source_end_line=76 source_column=13 source_end_column=36}
+}
+
+ENTRY %main.1 (spots.1: f32[1000]) -> (f32[1000], f32[1000]) {
+  %spots.1 = f32[1000]{0} parameter(0), metadata={op_name="spots"}
+  %multiply_log_fusion = f32[1000]{0} fusion(%spots.1), kind=kLoop, calls=%fused_computation.4, metadata={op_name="jit(price_and_delta_explicit)/jvp()/log" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=76 source_end_line=76 source_column=13 source_end_column=36}
+  %add_divide_fusion.1 = f32[1000]{0} fusion(%multiply_log_fusion), kind=kLoop, calls=%fused_computation.3, metadata={op_name="jit(price_and_delta_explicit)/jvp()/div" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=43 source_end_line=43 source_column=11 source_end_column=36}
+  %add_divide_fusion = f32[1000]{0} fusion(%multiply_log_fusion), kind=kLoop, calls=%fused_computation.2, metadata={op_name="jit(price_and_delta_explicit)/jvp()/div" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=43 source_end_line=43 source_column=11 source_end_column=36}
+  %multiply_subtract_fusion = f32[1000]{0} fusion(%add_divide_fusion, %spots.1, %add_divide_fusion.1), kind=kLoop, calls=%fused_computation.1, metadata={op_name="jit(price_and_delta_explicit)/jvp()/sub" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=85 source_end_line=85 source_column=11 source_end_column=22}
+  %multiply_add_fusion = f32[1000]{0} fusion(%add_divide_fusion.1, %spots.1, %add_divide_fusion), kind=kLoop, calls=%fused_computation, metadata={op_name="jit(price_and_delta_explicit)/transpose(jvp())/add_any" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=76 source_end_line=76 source_column=21 source_end_column=35}
+  ROOT %tuple.1 = (f32[1000]{0}, f32[1000]{0}) tuple(%multiply_subtract_fusion, %multiply_add_fusion)
+}
+

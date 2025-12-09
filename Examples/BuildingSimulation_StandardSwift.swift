@@ -211,7 +211,7 @@ func runStandardSwiftBenchmark(trials: Int = 100) {
     let avgForward = totalForwardTime / Double(trials) * 1_000_000  // μs
     let avgGradient = totalGradientTime / Double(trials) * 1_000_000  // μs
     let avgLoss = allLosses.reduce(0, +) / Float(allLosses.count)
-    let finalTemp = targetTemp + sqrt(avgLoss)  // Approximate final temp
+    let finalTemp = targetTemp + avgLoss.squareRoot()  // Approximate final temp
 
     print()
     print(String(repeating: "═", count: 60))

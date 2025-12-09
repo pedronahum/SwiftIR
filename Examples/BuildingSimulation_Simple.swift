@@ -245,7 +245,7 @@ do {
     let avgForward = (totalForwardTime / Double(trials)) * 1_000_000  // μs
     let avgGradient = (totalGradientTime / Double(trials)) * 1_000_000  // μs
     let avgLoss = predictions.reduce(0, +) / Float(predictions.count)
-    let lossStdDev = sqrt(predictions.map { pow($0 - avgLoss, 2) }.reduce(0, +) / Float(predictions.count))
+    let lossStdDev = (predictions.map { pow($0 - avgLoss, 2) }.reduce(0, +) / Float(predictions.count)).squareRoot()
 
     print("\n" + String(repeating: "═", count: 60))
     print("╔═══════════════════════════════════════════════════════════════╗")

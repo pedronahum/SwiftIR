@@ -13,6 +13,11 @@
 load("//xla/tsl/platform:rules_cc.bzl", "cc_library")
 load("//xla:xla.default.bzl", "xla_cc_binary")
 
+# Use package_group to get visibility into XLA internals
+package(
+    default_visibility = ["//visibility:public"],
+)
+
 cc_library(
     name = "pjrt_c_api_cpu_internal_profiler",
     srcs = ["pjrt_c_api_cpu_internal_profiler.cc"],
@@ -36,6 +41,7 @@ cc_library(
         "//xla/pjrt/plugin/xla_cpu:cpu_client_options",
 
         # Profiler dependencies (from xla/pjrt/c:pjrt_c_api_gpu_internal)
+        # Note: plugin_tracer_impl requires --check_visibility=false at build time
         "//xla/backends/profiler:profiler_backends",
         "//xla/backends/profiler/cpu:host_tracer",
         "//xla/backends/profiler/cpu:metadata_collector",

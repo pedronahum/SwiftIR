@@ -31,6 +31,10 @@ let pjrtHeaderPath: String
 // System library paths
 let systemLibDir: String
 
+// Shardy paths
+let shardyRoot: String
+let shardyBuildDir: String
+
 if useSDK {
     // Use pre-built SDK (Colab, Linux CI, deployed environments)
     stablehloRoot = swiftirDeps
@@ -43,6 +47,8 @@ if useSDK {
     xlaBaseliskBuildDir = swiftirDeps
     pjrtHeaderPath = "\(swiftirDeps)/include"
     systemLibDir = "\(swiftirDeps)/lib"
+    shardyRoot = swiftirDeps
+    shardyBuildDir = swiftirDeps
 } else {
     // Local development paths (macOS)
     stablehloRoot = "/Users/pedro/programming/swift/stablehlo"
@@ -55,6 +61,8 @@ if useSDK {
     xlaBaseliskBuildDir = "/Users/pedro/programming/swift/xla-bazelisk-build"
     pjrtHeaderPath = "\(xlaBaseliskBuildDir)/607423a1c455c14997634f7cf9a59c45/execroot/xla/bazel-out/darwin_arm64-opt/bin/xla/pjrt/c"
     systemLibDir = "/opt/homebrew/lib"  // Homebrew on macOS
+    shardyRoot = "/home/pedro/programming/swift/shardy"
+    shardyBuildDir = "\(shardyRoot)/bazel-bin"
 }
 
 // MARK: - Include Paths
@@ -92,6 +100,18 @@ let pjrtIncludePaths = [
     "-I", pjrtHeaderPath,
 ]
 
+let shardyIncludePaths: [String]
+if useSDK {
+    shardyIncludePaths = [
+        "-I", "\(swiftirDeps)/include",
+    ]
+} else {
+    shardyIncludePaths = [
+        "-I", "\(shardyRoot)/shardy/integrations/c",
+        "-I", "\(shardyRoot)",
+    ]
+}
+
 // MARK: - Linker Settings
 
 let mlirLinkerFlags = [
@@ -116,6 +136,19 @@ if useSDK {
         "-lPJRTProtoHelper",
         "-Xlinker", "-rpath", "-Xlinker", "@loader_path/../lib",
         "-Xlinker", "-rpath", "-Xlinker", "cmake/build/lib",
+    ]
+}
+
+let shardyLinkerFlags: [String]
+if useSDK {
+    shardyLinkerFlags = [
+        "-L\(systemLibDir)",
+        "-lsdy_capi",
+    ]
+} else {
+    shardyLinkerFlags = [
+        "-L\(shardyBuildDir)/shardy/integrations/c",
+        "-lsdy_capi",
     ]
 }
 
@@ -185,6 +218,16 @@ let package = Package(
             name: "SwiftIRProfiler",
             targets: ["SwiftIRProfiler"]
         ),
+        // Shardy tensor sharding/partitioning
+        .library(
+            name: "SwiftIRSharding",
+            targets: ["SwiftIRSharding"]
+        ),
+        // Shardy sharding - pure Swift version (no C dependencies)
+        .library(
+            name: "SwiftIRShardingLite",
+            targets: ["SwiftIRShardingLite"]
+        ),
         // Examples
         .executable(
             name: "SimpleNN",
@@ -253,6 +296,98 @@ let package = Package(
         .executable(
             name: "JupyterProfiledSimulation",
             targets: ["JupyterProfiledSimulation"]
+        ),
+        .executable(
+            name: "ShardingExample",
+            targets: ["ShardingExample"]
+        ),
+        .executable(
+            name: "JupyterShardingExample",
+            targets: ["JupyterShardingExample"]
+        ),
+        .executable(
+            name: "ShardedExecutionExample",
+            targets: ["ShardedExecutionExample"]
+        ),
+        .executable(
+            name: "ShardedTracingExample",
+            targets: ["ShardedTracingExample"]
+        ),
+        .executable(
+            name: "ShardingBenchmark",
+            targets: ["ShardingBenchmark"]
+        ),
+        .executable(
+            name: "JupyterShardingBenchmark",
+            targets: ["JupyterShardingBenchmark"]
+        ),
+        .executable(
+            name: "ShardedAutoDiffExample",
+            targets: ["ShardedAutoDiffExample"]
+        ),
+        .executable(
+            name: "JupyterShardedAutoDiffExample",
+            targets: ["JupyterShardedAutoDiffExample"]
+        ),
+        .executable(
+            name: "QuantFinancePureSwift",
+            targets: ["QuantFinancePureSwift"]
+        ),
+        .executable(
+            name: "QuantFinanceXLA",
+            targets: ["QuantFinanceXLA"]
+        ),
+        .executable(
+            name: "QuantFinanceTraced",
+            targets: ["QuantFinanceTraced"]
+        ),
+        .executable(
+            name: "QuantFinanceDifferentiable",
+            targets: ["QuantFinanceDifferentiable"]
+        ),
+        .executable(
+            name: "QuantFinanceShardy",
+            targets: ["QuantFinanceShardy"]
+        ),
+        .executable(
+            name: "QuantFinancePureSwiftDifferentiable",
+            targets: ["QuantFinancePureSwiftDifferentiable"]
+        ),
+        .executable(
+            name: "QuantFinanceJAXMLIR",
+            targets: ["QuantFinanceJAXMLIR"]
+        ),
+        .executable(
+            name: "QuantFinanceOptimized",
+            targets: ["QuantFinanceOptimized"]
+        ),
+        .executable(
+            name: "ProfileGap",
+            targets: ["ProfileGap"]
+        ),
+        .executable(
+            name: "QuantFinanceJAXStableHLO",
+            targets: ["QuantFinanceJAXStableHLO"]
+        ),
+        .executable(
+            name: "QuantFinancePJRTOptimized",
+            targets: ["QuantFinancePJRTOptimized"]
+        ),
+        .executable(
+            name: "PJRTTimingBreakdown",
+            targets: ["PJRTTimingBreakdown"]
+        ),
+        .executable(
+            name: "BufferPoolBenchmark",
+            targets: ["BufferPoolBenchmark"]
+        ),
+        .executable(
+            name: "PipelinedBenchmark",
+            targets: ["PipelinedBenchmark"]
+        ),
+        .executable(
+            name: "JAXComparison",
+            targets: ["JAXComparison"]
         ),
     ],
     dependencies: [
@@ -438,6 +573,375 @@ let package = Package(
             name: "SwiftIRProfiler",
             dependencies: ["PJRTCWrappers"],
             path: "Sources/SwiftIRProfiler"
+        ),
+
+        // MARK: - Shardy Tensor Sharding
+
+        // C wrappers for Shardy (SDY) dialect C API
+        .target(
+            name: "SdyCAPIWrappers",
+            dependencies: [],
+            path: "Sources/SwiftIRSharding",
+            sources: ["SdyCAPIWrapper.c"],
+            publicHeadersPath: "include",
+            cSettings: [
+                .unsafeFlags(mlirIncludePaths + shardyIncludePaths),
+            ],
+            linkerSettings: [
+                .unsafeFlags(shardyLinkerFlags),
+            ]
+        ),
+
+        // Shardy integration for tensor sharding and partitioning
+        .target(
+            name: "SwiftIRSharding",
+            dependencies: ["SdyCAPIWrappers", "MLIRCoreWrappers"],
+            path: "Sources/SwiftIRSharding",
+            exclude: ["SdyCAPIWrapper.c"],
+            swiftSettings: [
+                .interoperabilityMode(.Cxx),
+                .unsafeFlags(allSwiftIncludePaths + shardyIncludePaths),
+            ],
+            linkerSettings: [
+                .unsafeFlags(mlirLinkerFlags + shardyLinkerFlags),
+            ]
+        ),
+
+        // Pure Swift sharding - works in Jupyter/Colab without C++ interop
+        .target(
+            name: "SwiftIRShardingLite",
+            dependencies: [],
+            path: "Sources/SwiftIRShardingLite"
+        ),
+
+        // Sharding Example (using pure Swift version)
+        .executableTarget(
+            name: "ShardingExample",
+            dependencies: ["SwiftIRShardingLite"],
+            path: "Examples",
+            exclude: ["README.md"],
+            sources: ["ShardingExample.swift"]
+        ),
+
+        // Jupyter Sharding Example (SDY annotations with Jupyter tracing API)
+        .executableTarget(
+            name: "JupyterShardingExample",
+            dependencies: ["SwiftIRJupyter"],
+            path: "Examples",
+            exclude: ["README.md"],
+            sources: ["JupyterShardingExample.swift"]
+        ),
+
+        // Sharded Execution Example (PJRT distributed execution with SDY)
+        .executableTarget(
+            name: "ShardedExecutionExample",
+            dependencies: ["SwiftIR"],
+            path: "Examples",
+            exclude: ["README.md"],
+            sources: ["ShardedExecutionExample.swift"],
+            swiftSettings: [
+                .interoperabilityMode(.Cxx),
+                .unsafeFlags(allSwiftIncludePaths),
+            ]
+        ),
+
+        // Sharded Tracing Example (main SwiftIR module with SDY sharding)
+        .executableTarget(
+            name: "ShardedTracingExample",
+            dependencies: ["SwiftIR"],
+            path: "Examples",
+            exclude: ["README.md"],
+            sources: ["ShardedTracingExample.swift"],
+            swiftSettings: [
+                .interoperabilityMode(.Cxx),
+                .unsafeFlags(allSwiftIncludePaths),
+            ]
+        ),
+
+        // Sharding Benchmark (main SwiftIR module)
+        .executableTarget(
+            name: "ShardingBenchmark",
+            dependencies: ["SwiftIR"],
+            path: "Examples",
+            exclude: ["README.md"],
+            sources: ["ShardingBenchmark.swift"],
+            swiftSettings: [
+                .interoperabilityMode(.Cxx),
+                .unsafeFlags(allSwiftIncludePaths),
+            ]
+        ),
+
+        // Jupyter Sharding Benchmark (SwiftIRJupyter module)
+        .executableTarget(
+            name: "JupyterShardingBenchmark",
+            dependencies: ["SwiftIRJupyter"],
+            path: "Examples",
+            exclude: ["README.md"],
+            sources: ["JupyterShardingBenchmark.swift"]
+        ),
+
+        // Sharded AutoDiff Example (main SwiftIR module)
+        .executableTarget(
+            name: "ShardedAutoDiffExample",
+            dependencies: ["SwiftIR"],
+            path: "Examples",
+            exclude: ["README.md"],
+            sources: ["ShardedAutoDiffExample.swift"],
+            swiftSettings: [
+                .interoperabilityMode(.Cxx),
+                .unsafeFlags(allSwiftIncludePaths),
+            ]
+        ),
+
+        // Jupyter Sharded AutoDiff Example (SwiftIRJupyter module)
+        .executableTarget(
+            name: "JupyterShardedAutoDiffExample",
+            dependencies: ["SwiftIRJupyter"],
+            path: "Examples",
+            exclude: ["README.md"],
+            sources: ["JupyterShardedAutoDiffExample.swift"]
+        ),
+
+        // MARK: - Quantitative Finance Benchmarks (Benchmarks/QuantFinance/)
+
+        // Quantitative Finance: Pure Swift Baseline
+        // No MLIR, no XLA, no JIT - just standard Swift for performance comparison
+        .executableTarget(
+            name: "QuantFinancePureSwift",
+            dependencies: [],  // No dependencies - pure Swift
+            path: "Benchmarks/QuantFinance/pure-swift",
+            sources: ["main.swift"]
+        ),
+
+        // Quantitative Finance: SwiftIR + XLA Version
+        // Real MLIR compilation and XLA execution via PJRT
+        .executableTarget(
+            name: "QuantFinanceXLA",
+            dependencies: [
+                "SwiftIRXLA",
+                "SwiftIRCore",
+                "SwiftIRTypes",
+                "SwiftIRDialects",
+                "SwiftIRBuilders",
+                "SwiftIRStableHLO"
+            ],
+            path: "Benchmarks/QuantFinance/swiftir-xla",
+            sources: ["main.swift"],
+            swiftSettings: [
+                .interoperabilityMode(.Cxx),
+                .unsafeFlags(allSwiftIncludePaths),
+            ]
+        ),
+
+        // Quantitative Finance: SwiftIR Traced Version (DifferentiableTracer API)
+        // Uses DifferentiableTracer for natural Swift syntax with proper gradient compilation
+        .executableTarget(
+            name: "QuantFinanceTraced",
+            dependencies: [
+                "SwiftIR",
+                "SwiftIRXLA"
+            ],
+            path: "Benchmarks/QuantFinance/swiftir-traced",
+            sources: ["main.swift"],
+            swiftSettings: [
+                .interoperabilityMode(.Cxx),
+                .unsafeFlags(allSwiftIncludePaths),
+            ]
+        ),
+
+        // Quantitative Finance: SwiftIR Differentiable Version (Swift AD)
+        // Uses DifferentiableTracer with Swift's automatic differentiation
+        .executableTarget(
+            name: "QuantFinanceDifferentiable",
+            dependencies: [
+                "SwiftIR"
+            ],
+            path: "Benchmarks/QuantFinance/swiftir-differentiable",
+            sources: ["main.swift"],
+            swiftSettings: [
+                .interoperabilityMode(.Cxx),
+                .unsafeFlags(allSwiftIncludePaths),
+            ]
+        ),
+
+        // Quantitative Finance: SwiftIR Shardy Version (Distributed Sharding)
+        // Uses SDY sharding dialect for data-parallel and model-parallel execution
+        // Uses compileGradientForPJRT for proper gradient compilation
+        .executableTarget(
+            name: "QuantFinanceShardy",
+            dependencies: [
+                "SwiftIR",
+                "SwiftIRXLA"
+            ],
+            path: "Benchmarks/QuantFinance/swiftir-shardy",
+            sources: ["main.swift"],
+            swiftSettings: [
+                .interoperabilityMode(.Cxx),
+                .unsafeFlags(allSwiftIncludePaths),
+            ]
+        ),
+
+        // Quantitative Finance: JAX MLIR via SwiftIR PJRT
+        // Runs JAX's exact StableHLO through SwiftIR's PJRT to isolate bottleneck
+        .executableTarget(
+            name: "QuantFinanceJAXMLIR",
+            dependencies: [
+                "SwiftIR",
+                "SwiftIRXLA"
+            ],
+            path: "Benchmarks/QuantFinance/swiftir-jax-mlir",
+            sources: ["main.swift"],
+            swiftSettings: [
+                .interoperabilityMode(.Cxx),
+                .unsafeFlags(allSwiftIncludePaths),
+            ]
+        ),
+
+        // Quantitative Finance: Pure Swift + _Differentiation
+        // Uses Swift's automatic differentiation without any MLIR/XLA
+        .executableTarget(
+            name: "QuantFinancePureSwiftDifferentiable",
+            dependencies: [],  // No dependencies - pure Swift with _Differentiation
+            path: "Benchmarks/QuantFinance/pure-swift-differentiable",
+            sources: ["main.swift"]
+        ),
+
+        // Quantitative Finance: SwiftIR Optimized PJRT
+        // Tests the optimized execution path with buffer reuse
+        .executableTarget(
+            name: "QuantFinanceOptimized",
+            dependencies: [
+                "SwiftIR",
+                "SwiftIRXLA"
+            ],
+            path: "Benchmarks/QuantFinance/swiftir-optimized",
+            sources: ["main.swift"],
+            swiftSettings: [
+                .interoperabilityMode(.Cxx),
+                .unsafeFlags(allSwiftIncludePaths),
+            ]
+        ),
+
+        // Performance gap profiler - breaks down where time is spent
+        .executableTarget(
+            name: "ProfileGap",
+            dependencies: [
+                "SwiftIR",
+                "SwiftIRXLA"
+            ],
+            path: "Benchmarks/QuantFinance/swiftir-optimized",
+            sources: ["profile_gap.swift"],
+            swiftSettings: [
+                .interoperabilityMode(.Cxx),
+                .unsafeFlags(allSwiftIncludePaths),
+            ]
+        ),
+
+        // PJRT Timing Breakdown - profiles individual PJRT C API calls
+        .executableTarget(
+            name: "PJRTTimingBreakdown",
+            dependencies: [
+                "SwiftIR",
+                "SwiftIRXLA"
+            ],
+            path: "Benchmarks/QuantFinance/pjrt-timing",
+            sources: ["main.swift"],
+            swiftSettings: [
+                .interoperabilityMode(.Cxx),
+                .unsafeFlags(allSwiftIncludePaths),
+            ]
+        ),
+
+        // Quantitative Finance: JAX StableHLO via SwiftIR PJRT
+        // Tests JAX's exact StableHLO through SwiftIR's PJRT to isolate IR vs execution overhead
+        .executableTarget(
+            name: "QuantFinanceJAXStableHLO",
+            dependencies: [
+                "SwiftIR",
+                "SwiftIRXLA"
+            ],
+            path: "Benchmarks/QuantFinance/jax-stablehlo-in-swift",
+            sources: ["main.swift"],
+            swiftSettings: [
+                .interoperabilityMode(.Cxx),
+                .unsafeFlags(allSwiftIncludePaths),
+            ]
+        ),
+
+        // Quantitative Finance: Optimized PJRT execution benchmark
+        // Tests combined execute+transfer API and other FFI optimizations
+        .executableTarget(
+            name: "QuantFinancePJRTOptimized",
+            dependencies: [
+                "SwiftIR",
+                "SwiftIRXLA"
+            ],
+            path: "Benchmarks/QuantFinance/jax-stablehlo-optimized",
+            sources: ["main.swift"],
+            swiftSettings: [
+                .interoperabilityMode(.Cxx),
+                .unsafeFlags(allSwiftIncludePaths),
+            ]
+        ),
+
+        // Quantitative Finance: Overhead Analysis
+        // Isolates different sources of overhead in SwiftIR's PJRT path vs JAX
+        .executableTarget(
+            name: "OverheadAnalysis",
+            dependencies: [
+                "SwiftIRXLA"
+            ],
+            path: "Benchmarks/QuantFinance/overhead-analysis",
+            sources: ["main.swift"],
+            swiftSettings: [
+                .interoperabilityMode(.Cxx),
+                .unsafeFlags(allSwiftIncludePaths),
+            ]
+        ),
+
+        // Buffer Pool V2 and Batched Transfer Benchmark
+        // Compares different optimization levels for repeated execution
+        .executableTarget(
+            name: "BufferPoolBenchmark",
+            dependencies: [
+                "SwiftIRXLA"
+            ],
+            path: "Benchmarks",
+            sources: ["BufferPoolBenchmark.swift"],
+            swiftSettings: [
+                .interoperabilityMode(.Cxx),
+                .unsafeFlags(allSwiftIncludePaths),
+            ]
+        ),
+
+        // Pipelined Execution Benchmark
+        // Compares sequential vs pipelined execution to measure throughput improvement
+        .executableTarget(
+            name: "PipelinedBenchmark",
+            dependencies: [
+                "SwiftIRXLA"
+            ],
+            path: "Benchmarks",
+            sources: ["PipelinedBenchmark.swift"],
+            swiftSettings: [
+                .interoperabilityMode(.Cxx),
+                .unsafeFlags(allSwiftIncludePaths),
+            ]
+        ),
+
+        // JAX Comparison Benchmark
+        // Direct comparison of SwiftIR vs JAX performance
+        .executableTarget(
+            name: "JAXComparison",
+            dependencies: [
+                "SwiftIRXLA"
+            ],
+            path: "Benchmarks",
+            sources: ["JAXComparison.swift"],
+            swiftSettings: [
+                .interoperabilityMode(.Cxx),
+                .unsafeFlags(allSwiftIncludePaths),
+            ]
         ),
 
         // SPIR-V for Graphics/Compute
@@ -987,5 +1491,19 @@ let package = Package(
             dependencies: ["SwiftIRRuntime"],
             path: "Tests/SwiftIRRuntimeTests"
         ),
+
+        // Temporarily disabled - requires Shardy C++ library to be fully built
+        // .testTarget(
+        //     name: "SwiftIRShardingTests",
+        //     dependencies: ["SwiftIRSharding"],
+        //     path: "Tests/SwiftIRShardingTests",
+        //     swiftSettings: [
+        //         .interoperabilityMode(.Cxx),
+        //         .unsafeFlags(allSwiftIncludePaths + shardyIncludePaths),
+        //     ],
+        //     linkerSettings: [
+        //         .unsafeFlags(mlirLinkerFlags + shardyLinkerFlags),
+        //     ]
+        // ),
     ]
 )

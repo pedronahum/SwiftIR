@@ -1,0 +1,53 @@
+module @jit_price_only attributes {mhlo.num_partitions = 1 : i32, mhlo.num_replicas = 1 : i32} {
+  func.func public @main(%arg0: tensor<1000xf32>) -> (tensor<1000xf32> {jax.result_info = "result"}) {
+    %cst = stablehlo.constant dense<1.000000e+00> : tensor<f32>
+    %0 = stablehlo.sqrt %cst : tensor<f32>
+    %cst_0 = stablehlo.constant dense<2.000000e-01> : tensor<f32>
+    %1 = stablehlo.multiply %cst_0, %0 : tensor<f32>
+    %cst_1 = stablehlo.constant dense<1.000000e+02> : tensor<f32>
+    %2 = stablehlo.broadcast_in_dim %cst_1, dims = [] : (tensor<f32>) -> tensor<1000xf32>
+    %3 = stablehlo.divide %arg0, %2 : tensor<1000xf32>
+    %4 = stablehlo.log %3 : tensor<1000xf32>
+    %cst_2 = stablehlo.constant dense<7.000000e-02> : tensor<f32>
+    %5 = stablehlo.broadcast_in_dim %cst_2, dims = [] : (tensor<f32>) -> tensor<1000xf32>
+    %6 = stablehlo.add %4, %5 : tensor<1000xf32>
+    %7 = stablehlo.convert %1 : tensor<f32>
+    %8 = stablehlo.broadcast_in_dim %7, dims = [] : (tensor<f32>) -> tensor<1000xf32>
+    %9 = stablehlo.divide %6, %8 : tensor<1000xf32>
+    %10 = stablehlo.convert %1 : tensor<f32>
+    %11 = stablehlo.broadcast_in_dim %10, dims = [] : (tensor<f32>) -> tensor<1000xf32>
+    %12 = stablehlo.subtract %9, %11 : tensor<1000xf32>
+    %cst_3 = stablehlo.constant dense<-5.000000e-02> : tensor<f32>
+    %13 = stablehlo.exponential %cst_3 : tensor<f32>
+    %cst_4 = stablehlo.constant dense<1.702000e+00> : tensor<f32>
+    %14 = stablehlo.broadcast_in_dim %cst_4, dims = [] : (tensor<f32>) -> tensor<1000xf32>
+    %15 = stablehlo.multiply %9, %14 : tensor<1000xf32>
+    %16 = stablehlo.negate %15 : tensor<1000xf32>
+    %17 = stablehlo.exponential %16 : tensor<1000xf32>
+    %cst_5 = stablehlo.constant dense<1.000000e+00> : tensor<f32>
+    %18 = stablehlo.broadcast_in_dim %cst_5, dims = [] : (tensor<f32>) -> tensor<1000xf32>
+    %19 = stablehlo.add %18, %17 : tensor<1000xf32>
+    %cst_6 = stablehlo.constant dense<1.000000e+00> : tensor<f32>
+    %20 = stablehlo.broadcast_in_dim %cst_6, dims = [] : (tensor<f32>) -> tensor<1000xf32>
+    %21 = stablehlo.divide %20, %19 : tensor<1000xf32>
+    %cst_7 = stablehlo.constant dense<1.702000e+00> : tensor<f32>
+    %22 = stablehlo.broadcast_in_dim %cst_7, dims = [] : (tensor<f32>) -> tensor<1000xf32>
+    %23 = stablehlo.multiply %12, %22 : tensor<1000xf32>
+    %24 = stablehlo.negate %23 : tensor<1000xf32>
+    %25 = stablehlo.exponential %24 : tensor<1000xf32>
+    %cst_8 = stablehlo.constant dense<1.000000e+00> : tensor<f32>
+    %26 = stablehlo.broadcast_in_dim %cst_8, dims = [] : (tensor<f32>) -> tensor<1000xf32>
+    %27 = stablehlo.add %26, %25 : tensor<1000xf32>
+    %cst_9 = stablehlo.constant dense<1.000000e+00> : tensor<f32>
+    %28 = stablehlo.broadcast_in_dim %cst_9, dims = [] : (tensor<f32>) -> tensor<1000xf32>
+    %29 = stablehlo.divide %28, %27 : tensor<1000xf32>
+    %30 = stablehlo.multiply %arg0, %21 : tensor<1000xf32>
+    %cst_10 = stablehlo.constant dense<1.000000e+02> : tensor<f32>
+    %31 = stablehlo.multiply %cst_10, %13 : tensor<f32>
+    %32 = stablehlo.convert %31 : tensor<f32>
+    %33 = stablehlo.broadcast_in_dim %32, dims = [] : (tensor<f32>) -> tensor<1000xf32>
+    %34 = stablehlo.multiply %33, %29 : tensor<1000xf32>
+    %35 = stablehlo.subtract %30, %34 : tensor<1000xf32>
+    return %35 : tensor<1000xf32>
+  }
+}

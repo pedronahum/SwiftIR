@@ -6,6 +6,7 @@
 
 import Foundation
 import _Differentiation
+import SwiftIRXLA
 
 // MARK: - Helper Functions
 
@@ -1677,45 +1678,69 @@ public func diffSquare(_ x: DifferentiableTracer) -> DifferentiableTracer {
 
 // MARK: - Helper Functions
 
-/// Create a constant tensor
+/// Create a constant tensor using JAX-style scalar + broadcast_in_dim pattern
+///
+/// This generates more efficient IR by creating a scalar constant and broadcasting
+/// it to the target shape, matching JAX's pattern:
+///   %cst = stablehlo.constant dense<value> : tensor<f32>
+///   %0 = stablehlo.broadcast_in_dim %cst, dims = [] : (tensor<f32>) -> tensor<Nxf32>
+///
+/// For scalar shapes (empty shape), only the constant is generated.
 public func createConstant(_ value: Float, shape: [Int], dtype: DType) -> DifferentiableTracer {
     guard let builder = DifferentiableTracer.currentBuilder else {
         fatalError("No active MLIRBuilder")
     }
 
-    let result = builder.freshSSA()
-    let resultType: String
-    if shape.isEmpty {
-        resultType = "tensor<\(dtype.rawValue)>"
-    } else {
-        resultType = "tensor<\(shape.map(String.init).joined(separator: "x"))x\(dtype.rawValue)>"
-    }
-
     // Format value based on dtype
     let formattedValue: String
     if dtype == .int32 || dtype == .int64 {
-        // For integer types, use integer notation
         formattedValue = String(Int(value))
     } else {
-        // For float types, ensure it has decimal point for StableHLO
         if value == 0 {
             formattedValue = "0.000000e+00"
         } else {
-            // Use scientific notation with explicit decimal
             formattedValue = String(format: "%.6e", value)
         }
     }
 
-    let attrs = withoutDerivative(at: ["value": "dense<\(formattedValue)> : \(resultType)"])
+    // Scalar type for the constant
+    let scalarType = "tensor<\(dtype.rawValue)>"
+
+    // Step 1: Create scalar constant
+    let scalarResult = builder.freshSSA()
+    let scalarAttrs = withoutDerivative(at: ["value": "dense<\(formattedValue)> : \(scalarType)"])
     builder.addOperation(MLIROperation(
-        result: result,
+        result: scalarResult,
         opName: "constant",
         operands: [],
-        attributes: attrs,
+        attributes: scalarAttrs,
+        resultType: scalarType
+    ))
+
+    // For scalar shape, return the scalar constant directly
+    if shape.isEmpty {
+        return DifferentiableTracer(irValue: scalarResult, shape: shape, dtype: dtype)
+    }
+
+    // Step 2: Broadcast to target shape using broadcast_in_dim
+    let resultType = "tensor<\(shape.map(String.init).joined(separator: "x"))x\(dtype.rawValue)>"
+    let broadcastResult = builder.freshSSA()
+
+    // broadcast_in_dim with empty dims = [] broadcasts a scalar to any shape
+    // JAX format: %0 = stablehlo.broadcast_in_dim %cst, dims = [] : (tensor<f32>) -> tensor<Nxf32>
+    let broadcastAttrs = withoutDerivative(at: [
+        "broadcast_dimensions": "[]",  // Empty array for scalar broadcast
+        "_input_type": scalarType  // For type signature generation
+    ])
+    builder.addOperation(MLIROperation(
+        result: broadcastResult,
+        opName: "broadcast_in_dim",
+        operands: [scalarResult],
+        attributes: broadcastAttrs,
         resultType: resultType
     ))
 
-    return DifferentiableTracer(irValue: result, shape: shape, dtype: dtype)
+    return DifferentiableTracer(irValue: broadcastResult, shape: shape, dtype: dtype)
 }
 
 // MARK: - Loss Functions
@@ -1992,9 +2017,23 @@ public func jvp(
 /// Compiles a function with its gradients using the Trojan Horse mechanism
 public class GradientCompiler {
     private let options: CompilationOptions
+    private let mlirOptimizationLevel: MLIROptimizationLevel
 
-    public init(options: CompilationOptions = .default) {
+    /// Initialize the gradient compiler
+    /// - Parameters:
+    ///   - options: Compilation options
+    ///   - mlirOptimizationLevel: MLIR-level optimization (default: .standard)
+    ///     - .none: No MLIR optimization (JAX-style, let XLA handle it)
+    ///     - .minimal: Only DCE
+    ///     - .reduced: CSE + DCE only
+    ///     - .standard: Full 7-pass pipeline
+    ///     - .maximum: Full pipeline with more iterations
+    public init(
+        options: CompilationOptions = .default,
+        mlirOptimizationLevel: MLIROptimizationLevel = .standard
+    ) {
         self.options = options
+        self.mlirOptimizationLevel = mlirOptimizationLevel
     }
 
     /// Compile a differentiable function with gradient computation
@@ -2019,17 +2058,10 @@ public class GradientCompiler {
         // Record forward output
         let forwardOutputSSA = output.irValue
 
-        // Create seed gradient for backward pass
-        let seedName = "%seed"
-        let seedType: String
-        if output.shape.isEmpty {
-            seedType = "tensor<\(dtype.rawValue)>"
-        } else {
-            seedType = tensorType(shape: output.shape, dtype: dtype)
-        }
-        builder.addArgument(name: seedName, type: seedType)
-
-        let seed = DifferentiableTracer(irValue: seedName, shape: output.shape, dtype: dtype)
+        // Create seed gradient as a CONSTANT (not a function argument!)
+        // This matches JAX's approach: embed ones_like(primals) in the IR
+        // instead of passing it as a runtime input, eliminating data transfer overhead
+        let seed = createConstant(1.0, shape: output.shape, dtype: dtype)
 
         // THE TROJAN HORSE MOMENT: Run pullback with Tracer
         // This executes Swift's AD-generated gradient code
@@ -2039,8 +2071,8 @@ public class GradientCompiler {
         // Set results: [forward_output, gradient]
         builder.setResults([forwardOutputSSA, gradient.irValue])
 
-        // Build MLIR module
-        let module = builder.build(functionName: "main")
+        // Build MLIR module with optimization at specified level
+        let module = builder.buildOptimized(functionName: "main", level: mlirOptimizationLevel)
 
         DifferentiableTracer.currentBuilder = nil
 
@@ -2094,7 +2126,8 @@ public class GradientCompiler {
         // Set results
         builder.setResults([forwardOutputSSA, grad0.irValue, grad1.irValue])
 
-        let module = builder.build(functionName: "main")
+        // Build MLIR module with optimization at specified level
+        let module = builder.buildOptimized(functionName: "main", level: mlirOptimizationLevel)
 
         DifferentiableTracer.currentBuilder = nil
 
@@ -2165,20 +2198,30 @@ public class GradientCompiledFunction {
 
 extension GradientCompiledFunction {
     /// Convert to a real PJRT-backed gradient function
-    public func toPJRTGradientFunction(backend: PJRTBackedRuntime.Backend = .cpu) throws -> PJRTGradientFunction {
+    public func toPJRTGradientFunction(
+        backend: PJRTBackedRuntime.Backend = .cpu,
+        xlaOptLevel: XLAOptimizationLevel = .default
+    ) throws -> PJRTGradientFunction {
         let runtime = try PJRTBackedRuntime(backend: backend)
         let executable = try runtime.compile(compiled.mlirSource)
+        executable.xlaOptLevel = xlaOptLevel
         return PJRTGradientFunction(
             executable: executable,
             inputShape: inputShape,
-            outputShape: outputShape
+            outputShape: outputShape,
+            mlirSource: compiled.mlirSource
         )
     }
 
     /// Convert to a real PJRT-backed gradient function with two inputs
-    public func toPJRTGradientFunction2(backend: PJRTBackedRuntime.Backend = .cpu, input2Shape: [Int]) throws -> PJRTGradientFunction2 {
+    public func toPJRTGradientFunction2(
+        backend: PJRTBackedRuntime.Backend = .cpu,
+        input2Shape: [Int],
+        xlaOptLevel: XLAOptimizationLevel = .default
+    ) throws -> PJRTGradientFunction2 {
         let runtime = try PJRTBackedRuntime(backend: backend)
         let executable = try runtime.compile(compiled.mlirSource)
+        executable.xlaOptLevel = xlaOptLevel
         return PJRTGradientFunction2(
             executable: executable,
             input1Shape: inputShape,
@@ -2194,10 +2237,26 @@ public class PJRTGradientFunction {
     public let inputShape: [Int]
     public let outputShape: [Int]
 
-    public init(executable: PJRTBackedExecutable, inputShape: [Int], outputShape: [Int]) {
+    /// The generated MLIR/StableHLO source (for debugging/comparison)
+    public let mlirSource: String
+
+    public init(executable: PJRTBackedExecutable, inputShape: [Int], outputShape: [Int], mlirSource: String = "") {
         self.executable = executable
         self.inputShape = inputShape
         self.outputShape = outputShape
+        self.mlirSource = mlirSource
+    }
+
+    /// Print the generated MLIR for debugging
+    public func printMLIR() {
+        print("=== Generated MLIR/StableHLO ===")
+        print(mlirSource)
+        print("================================")
+    }
+
+    /// Write MLIR to a file
+    public func writeMLIR(to path: String) throws {
+        try mlirSource.write(toFile: path, atomically: true, encoding: .utf8)
     }
 
     /// Run forward pass only on real hardware
@@ -2209,12 +2268,17 @@ public class PJRTGradientFunction {
                 "Input size mismatch: expected \(expectedSize) elements for shape \(inputShape), got \(input.count)")
         }
 
-        let results = try executable.execute([input, [Float](repeating: 0, count: outputShape.reduce(1, *))])
+        // Execute with single input - seed is embedded as constant in IR
+        let results = try executable.execute([input])
         return results[0]
     }
 
     /// Run forward and backward pass on real hardware
-    public func forwardWithGradient(_ input: [Float], seed: [Float]) throws -> (output: [Float], gradient: [Float]) {
+    ///
+    /// Note: The seed is now embedded as a constant 1.0 in the IR (like JAX's value_and_grad).
+    /// The seed parameter is kept for API compatibility but is IGNORED.
+    /// This eliminates ~400KB of data transfer per call at 100K batch size.
+    public func forwardWithGradient(_ input: [Float], seed: [Float]? = nil) throws -> (output: [Float], gradient: [Float]) {
         // Validate input shape
         let expectedInputSize = inputShape.reduce(1, *)
         guard input.count == expectedInputSize else {
@@ -2222,14 +2286,89 @@ public class PJRTGradientFunction {
                 "Input size mismatch: expected \(expectedInputSize) elements for shape \(inputShape), got \(input.count)")
         }
 
-        // Validate seed shape
-        let expectedSeedSize = outputShape.reduce(1, *)
-        guard seed.count == expectedSeedSize else {
+        // Execute with single input - seed is embedded as constant in IR
+        let results = try executable.execute([input])
+        guard results.count >= 2 else {
+            throw PJRTExecutionError.executionFailed("Expected 2 outputs but got \(results.count)")
+        }
+        return (results[0], results[1])
+    }
+
+    /// Run forward and backward pass with async execution (optimized path)
+    public func forwardWithGradientAsync(_ input: [Float]) throws -> (output: [Float], gradient: [Float]) {
+        // Validate input shape
+        let expectedInputSize = inputShape.reduce(1, *)
+        guard input.count == expectedInputSize else {
             throw PJRTExecutionError.bufferError(
-                "Seed size mismatch: expected \(expectedSeedSize) elements for shape \(outputShape), got \(seed.count)")
+                "Input size mismatch: expected \(expectedInputSize) elements for shape \(inputShape), got \(input.count)")
         }
 
-        let results = try executable.execute([input, seed])
+        // Execute with single input - seed is embedded as constant in IR
+        let results = try executable.executeAsync([input])
+        guard results.count >= 2 else {
+            throw PJRTExecutionError.executionFailed("Expected 2 outputs but got \(results.count)")
+        }
+        return (results[0], results[1])
+    }
+
+    /// Run forward and backward pass with combined execute+transfer API (reduces FFI overhead)
+    public func forwardWithGradientCombined(_ input: [Float]) throws -> (output: [Float], gradient: [Float]) {
+        // Validate input shape
+        let expectedInputSize = inputShape.reduce(1, *)
+        guard input.count == expectedInputSize else {
+            throw PJRTExecutionError.bufferError(
+                "Input size mismatch: expected \(expectedInputSize) elements for shape \(inputShape), got \(input.count)")
+        }
+
+        // Execute with combined API
+        let results = try executable.executeCombined([input])
+        guard results.count >= 2 else {
+            throw PJRTExecutionError.executionFailed("Expected 2 outputs but got \(results.count)")
+        }
+        return (results[0], results[1])
+    }
+
+    /// Run forward and backward pass with hot path API (minimal FFI overhead)
+    ///
+    /// This is the most optimized execution path, combining H2D, Execute, and D2H
+    /// all in a single FFI call. Best for tight loops where every microsecond counts.
+    public func forwardWithGradientHotPath(_ input: [Float]) throws -> (output: [Float], gradient: [Float]) {
+        // Validate input shape
+        let expectedInputSize = inputShape.reduce(1, *)
+        guard input.count == expectedInputSize else {
+            throw PJRTExecutionError.bufferError(
+                "Input size mismatch: expected \(expectedInputSize) elements for shape \(inputShape), got \(input.count)")
+        }
+
+        // Output shapes are same as input for gradient function (forward + gradient)
+        let outputSizes = [expectedInputSize, expectedInputSize]
+
+        // Execute with hot path API
+        let results = try executable.executeHotPath([input], outputSizes: outputSizes)
+        guard results.count >= 2 else {
+            throw PJRTExecutionError.executionFailed("Expected 2 outputs but got \(results.count)")
+        }
+        return (results[0], results[1])
+    }
+
+    /// Ultra-optimized forward+gradient with all optimizations enabled
+    ///
+    /// Uses:
+    /// - Global executable cache
+    /// - Input buffer reuse (skips H2D when data unchanged)
+    /// - Preallocated output arrays
+    /// - Async overlapped D2H transfers
+    /// - Cached output metadata
+    public func forwardWithGradientUltraOptimized(_ input: [Float]) throws -> (output: [Float], gradient: [Float]) {
+        // Validate input shape
+        let expectedInputSize = inputShape.reduce(1, *)
+        guard input.count == expectedInputSize else {
+            throw PJRTExecutionError.bufferError(
+                "Input size mismatch: expected \(expectedInputSize) elements for shape \(inputShape), got \(input.count)")
+        }
+
+        // Execute with ultra-optimized path
+        let results = try executable.executeUltraOptimized([input])
         guard results.count >= 2 else {
             throw PJRTExecutionError.executionFailed("Expected 2 outputs but got \(results.count)")
         }
@@ -2238,8 +2377,7 @@ public class PJRTGradientFunction {
 
     /// Compute gradient with unit seed (for scalar output functions)
     public func gradient(_ input: [Float]) throws -> [Float] {
-        let seed = [Float](repeating: 1.0, count: outputShape.reduce(1, *))
-        let (_, grad) = try forwardWithGradient(input, seed: seed)
+        let (_, grad) = try forwardWithGradient(input)
         return grad
     }
 
@@ -2256,34 +2394,54 @@ public class PJRTGradientFunction {
 // MARK: - High-Level PJRT Gradient API
 
 /// Compile a differentiable function to PJRT with gradient support
+/// - Parameters:
+///   - input: Tensor specification (shape, dtype)
+///   - backend: PJRT backend (default: .cpu)
+///   - mlirOptimization: MLIR-level optimization level (default: .none for best performance)
+///     - .none: No MLIR optimization (JAX-style, let XLA handle it) - FASTEST
+///     - .minimal: Only DCE
+///     - .reduced: CSE + DCE only
+///     - .standard: Full 7-pass pipeline
+///   - xlaOptimization: XLA backend optimization level (default: .default)
+///     - .default: Use XLA's default optimization level
+///     - .O0: No optimization (fastest compile, slowest execution)
+///     - .O1: Basic optimization
+///     - .O2: Standard optimization (GPU requires >= O2)
+///     - .O3: Maximum optimization (slowest compile, best execution)
+///   - function: The differentiable function to compile
 public func compileGradientForPJRT(
     input: TensorSpec,
     backend: PJRTBackedRuntime.Backend = .cpu,
+    mlirOptimization: MLIROptimizationLevel = .none,
+    xlaOptimization: XLAOptimizationLevel = .default,
     _ function: @escaping @differentiable(reverse) (DifferentiableTracer) -> DifferentiableTracer
 ) throws -> PJRTGradientFunction {
-    let compiler = GradientCompiler()
+    let compiler = GradientCompiler(mlirOptimizationLevel: mlirOptimization)
     let gradFunc = try compiler.compileWithGradients(
         inputShape: input.shape,
         dtype: input.dtype,
         function
     )
-    return try gradFunc.toPJRTGradientFunction(backend: backend)
+    return try gradFunc.toPJRTGradientFunction(backend: backend, xlaOptLevel: xlaOptimization)
 }
 
 /// Compile a two-input differentiable function to PJRT with gradient support
 public func compileGradientForPJRT(
     inputs: (TensorSpec, TensorSpec),
     backend: PJRTBackedRuntime.Backend = .cpu,
+    mlirOptimization: MLIROptimizationLevel = .none,
+    xlaOptimization: XLAOptimizationLevel = .default,
     _ function: @escaping @differentiable(reverse) (DifferentiableTracer, DifferentiableTracer) -> DifferentiableTracer
 ) throws -> PJRTGradientFunction2 {
-    let compiler = GradientCompiler()
+    let compiler = GradientCompiler(mlirOptimizationLevel: mlirOptimization)
     let gradFunc = try compiler.compileWithGradients(
         inputSpecs: [(inputs.0.shape, inputs.0.dtype), (inputs.1.shape, inputs.1.dtype)],
         function
     )
     return try gradFunc.toPJRTGradientFunction2(
         backend: backend,
-        input2Shape: inputs.1.shape
+        input2Shape: inputs.1.shape,
+        xlaOptLevel: xlaOptimization
     )
 }
 
@@ -2480,7 +2638,7 @@ public struct AdamOptimizer: Optimizer {
             let vHat = v![i] / (1 - pow(beta2, Float(t)))
 
             // Update parameters
-            parameters[i] -= learningRate * mHat / (sqrt(vHat) + epsilon)
+            parameters[i] -= learningRate * mHat / (vHat.squareRoot() + epsilon)
         }
     }
 }
@@ -2505,7 +2663,7 @@ public struct RMSpropOptimizer: Optimizer {
 
         for i in 0..<parameters.count {
             cache![i] = rho * cache![i] + (1 - rho) * gradients[i] * gradients[i]
-            parameters[i] -= learningRate * gradients[i] / (sqrt(cache![i]) + epsilon)
+            parameters[i] -= learningRate * gradients[i] / (cache![i].squareRoot() + epsilon)
         }
     }
 }

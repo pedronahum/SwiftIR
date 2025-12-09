@@ -1,0 +1,45 @@
+HloModule jit_price_only, is_scheduled=true, entry_computation_layout={(f32[1000]{0})->f32[1000]{0}}, allow_spmd_sharding_propagation_to_parameters={true}, allow_spmd_sharding_propagation_to_output={true}
+
+%fused_computation (param_0.2: f32[1000]) -> f32[1000] {
+  %param_0.2 = f32[1000]{0} parameter(0)
+  %constant.17 = f32[] constant(1)
+  %broadcast.12 = f32[1000]{0} broadcast(%constant.17), dimensions={}
+  %constant.16 = f32[] constant(0.01)
+  %broadcast.11 = f32[1000]{0} broadcast(%constant.16), dimensions={}, metadata={op_name="jit(price_only)/div" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=76 source_end_line=76 source_column=21 source_end_column=35}
+  %multiply.5 = f32[1000]{0} multiply(%param_0.2, %broadcast.11), metadata={op_name="jit(price_only)/div" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=76 source_end_line=76 source_column=21 source_end_column=35}
+  %log.0 = f32[1000]{0} log(%multiply.5), metadata={op_name="jit(price_only)/log" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=76 source_end_line=76 source_column=13 source_end_column=36}
+  %constant.15 = f32[] constant(0.07)
+  %add.9 = f32[1000]{0} broadcast(%constant.15), dimensions={}, metadata={op_name="jit(price_only)/add" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=78 source_end_line=78 source_column=10 source_end_column=24}
+  %add.8 = f32[1000]{0} add(%log.0, %add.9), metadata={op_name="jit(price_only)/add" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=78 source_end_line=78 source_column=10 source_end_column=24}
+  %constant.14 = f32[] constant(8.51)
+  %broadcast.10 = f32[1000]{0} broadcast(%constant.14), dimensions={}, metadata={op_name="jit(price_only)/mul" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=43 source_end_line=43 source_column=26 source_end_column=35}
+  %mul.4 = f32[1000]{0} multiply(%add.8, %broadcast.10), metadata={op_name="jit(price_only)/mul" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=43 source_end_line=43 source_column=26 source_end_column=35}
+  %neg.1 = f32[1000]{0} negate(%mul.4), metadata={op_name="jit(price_only)/neg" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=43 source_end_line=43 source_column=11 source_end_column=36}
+  %exp.1 = f32[1000]{0} exponential(%neg.1), metadata={op_name="jit(price_only)/exp" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=43 source_end_line=43 source_column=11 source_end_column=36}
+  %add.3 = f32[1000]{0} add(%exp.1, %broadcast.12), metadata={op_name="jit(price_only)/add" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=43 source_end_line=43 source_column=11 source_end_column=36}
+  %div.1 = f32[1000]{0} divide(%broadcast.12, %add.3), metadata={op_name="jit(price_only)/div" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=43 source_end_line=43 source_column=11 source_end_column=36}
+  %mul.3 = f32[1000]{0} multiply(%param_0.2, %div.1), metadata={op_name="jit(price_only)/mul" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=85 source_end_line=85 source_column=11 source_end_column=22}
+  %constant.13 = f32[] constant(5)
+  %broadcast.9 = f32[1000]{0} broadcast(%constant.13), dimensions={}
+  %multiply.4 = f32[1000]{0} multiply(%add.8, %broadcast.9), metadata={op_name="jit(price_only)/div" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=78 source_end_line=78 source_column=9 source_end_column=33}
+  %constant.12 = f32[] constant(-0.2)
+  %broadcast.8 = f32[1000]{0} broadcast(%constant.12), dimensions={}
+  %add.2 = f32[1000]{0} add(%multiply.4, %broadcast.8), metadata={op_name="jit(price_only)/sub" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=79 source_end_line=79 source_column=9 source_end_column=19}
+  %constant.5 = f32[] constant(1.702)
+  %broadcast.7 = f32[1000]{0} broadcast(%constant.5), dimensions={}
+  %mul.2 = f32[1000]{0} multiply(%add.2, %broadcast.7), metadata={op_name="jit(price_only)/mul" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=43 source_end_line=43 source_column=26 source_end_column=35}
+  %neg.0 = f32[1000]{0} negate(%mul.2), metadata={op_name="jit(price_only)/neg" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=43 source_end_line=43 source_column=11 source_end_column=36}
+  %exp.0 = f32[1000]{0} exponential(%neg.0), metadata={op_name="jit(price_only)/exp" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=43 source_end_line=43 source_column=11 source_end_column=36}
+  %add.1 = f32[1000]{0} add(%exp.0, %broadcast.12), metadata={op_name="jit(price_only)/add" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=43 source_end_line=43 source_column=11 source_end_column=36}
+  %div.0 = f32[1000]{0} divide(%broadcast.12, %add.1), metadata={op_name="jit(price_only)/div" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=43 source_end_line=43 source_column=11 source_end_column=36}
+  %constant.4 = f32[] constant(95.1229477)
+  %mul.1 = f32[1000]{0} broadcast(%constant.4), dimensions={}, metadata={op_name="jit(price_only)/mul" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=85 source_end_line=85 source_column=25 source_end_column=42}
+  %mul.0 = f32[1000]{0} multiply(%div.0, %mul.1), metadata={op_name="jit(price_only)/mul" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=85 source_end_line=85 source_column=25 source_end_column=42}
+  ROOT %sub.0 = f32[1000]{0} subtract(%mul.3, %mul.0), metadata={op_name="jit(price_only)/sub" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=85 source_end_line=85 source_column=11 source_end_column=22}
+}
+
+ENTRY %main.1 (spots.1: f32[1000]) -> f32[1000] {
+  %spots.1 = f32[1000]{0} parameter(0), metadata={op_name="spots"}
+  ROOT %multiply_subtract_fusion = f32[1000]{0} fusion(%spots.1), kind=kLoop, calls=%fused_computation, metadata={op_name="jit(price_only)/sub" source_file="/home/pedro/programming/swift/SwiftIR/Benchmarks/QuantFinance/jax-python/benchmark.py" source_line=85 source_end_line=85 source_column=11 source_end_column=22}
+}
+

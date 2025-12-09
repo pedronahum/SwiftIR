@@ -17,6 +17,7 @@ STABLEHLO_VERSION="${STABLEHLO_VERSION:-v1.0.0}"
 # LLVM commit that StableHLO v1.0.0 was built against
 LLVM_COMMIT="${LLVM_COMMIT:-a6d7828f4c50c1ec7b0b5f61fe59d7a768175dcc}"
 XLA_COMMIT="${XLA_COMMIT:-main}"
+SHARDY_COMMIT="${SHARDY_COMMIT:-main}"
 
 # Installation directories
 DEPS_DIR="${SWIFTIR_DEPS_DIR:-/opt/swiftir-deps}"
@@ -45,6 +46,7 @@ SKIP_SWIFT=false
 SKIP_LLVM=false
 SKIP_STABLEHLO=false
 SKIP_XLA=false
+SKIP_SHARDY=false
 SKIP_DEPS=false
 
 while [[ $# -gt 0 ]]; do
@@ -53,6 +55,7 @@ while [[ $# -gt 0 ]]; do
         --skip-llvm) SKIP_LLVM=true; shift ;;
         --skip-stablehlo) SKIP_STABLEHLO=true; shift ;;
         --skip-xla) SKIP_XLA=true; shift ;;
+        --skip-shardy) SKIP_SHARDY=true; shift ;;
         --skip-deps) SKIP_DEPS=true; shift ;;
         --swift-version) SWIFT_VERSION="$2"; shift 2 ;;
         --jobs) JOBS="$2"; shift 2 ;;
@@ -66,6 +69,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --skip-llvm       Skip LLVM/MLIR build"
             echo "  --skip-stablehlo  Skip StableHLO build"
             echo "  --skip-xla        Skip XLA/PJRT build"
+            echo "  --skip-shardy     Skip Shardy (SDY) build"
             echo "  --skip-deps       Skip apt dependencies"
             echo "  --swift-version   Swift version (default: $SWIFT_VERSION)"
             echo "  --jobs N          Parallel build jobs (default: $JOBS)"
@@ -85,6 +89,7 @@ echo "  Swift Version:    $SWIFT_VERSION"
 echo "  LLVM Commit:      $LLVM_COMMIT"
 echo "  StableHLO:        $STABLEHLO_VERSION"
 echo "  XLA Commit:       $XLA_COMMIT"
+echo "  Shardy Commit:    $SHARDY_COMMIT"
 echo "  Dependencies:     $DEPS_DIR"
 echo "  Build Directory:  $BUILD_DIR"
 echo "  Parallel Jobs:    $JOBS"
@@ -408,8 +413,10 @@ EOF
     # Build patched PJRT plugin (with profiler extension + TraceMe API) and SwiftIR profiler
     # - pjrt_c_api_cpu_plugin_profiler.so: CPU plugin with profiler extension and TraceMe API
     # - libswiftir_profiler.so: Standalone profiler (~42MB) for fallback/legacy use
+    # Note: --check_visibility=false is required because plugin_tracer_impl is internal to XLA
     bazelisk --output_user_root="$BUILD_DIR/xla-bazelisk-build" \
-        build //pjrt_cpu:pjrt_c_api_cpu_plugin_profiler.so \
+        build --check_visibility=false \
+              //pjrt_cpu:pjrt_c_api_cpu_plugin_profiler.so \
               //swiftir:libswiftir_profiler.so
 
     # Find and install patched PJRT plugin (rename to standard name for compatibility)
@@ -440,6 +447,74 @@ EOF
     log_success "XLA PJRT plugin (with profiler + TraceMe) and SwiftIR profiler built"
 else
     log_info "Skipping XLA/PJRT build (--skip-xla)"
+fi
+
+# ============================================================
+# 7.5. Build Shardy (SDY Sharding Dialect)
+# ============================================================
+
+if [ "$SKIP_SHARDY" = false ] && [ "$SKIP_XLA" = false ]; then
+    log_info "Building Shardy (SDY Sharding Dialect)..."
+
+    cd "$BUILD_DIR"
+
+    # Clone Shardy if not present
+    if [ ! -d "shardy" ]; then
+        git clone https://github.com/openxla/shardy.git
+    fi
+
+    cd shardy
+    git fetch origin
+    git checkout "$SHARDY_COMMIT"
+
+    # Build Shardy C API and sdy_opt tool
+    # Use PATH override to avoid Swift clang conflicts with Bazel
+    # --check_visibility=false in case internal deps have restricted visibility
+    log_info "Building Shardy with Bazel (this may take a while)..."
+    PATH=/usr/bin:/bin:/usr/local/bin bazelisk build -c opt \
+        --lockfile_mode=error \
+        --check_visibility=false \
+        --features=-parse_headers \
+        --features=-layering_check \
+        //shardy/integrations/c:sdy_capi \
+        //shardy/tools:sdy_opt
+
+    # Find and install sdy_opt
+    log_info "Installing sdy_opt..."
+    SDY_OPT_PATH=$(find bazel-bin -name "sdy_opt" -type f -executable 2>/dev/null | head -1)
+    if [ -n "$SDY_OPT_PATH" ] && [ -f "$SDY_OPT_PATH" ]; then
+        cp "$SDY_OPT_PATH" "$DEPS_DIR/bin/"
+        chmod +x "$DEPS_DIR/bin/sdy_opt"
+        log_success "sdy_opt installed to $DEPS_DIR/bin/"
+    else
+        log_warn "sdy_opt not found - Shardy build may have failed"
+    fi
+
+    # Find and install libsdy_capi.so
+    log_info "Installing libsdy_capi.so..."
+    SDY_CAPI_PATH=$(find bazel-bin -name "libsdy_capi.so" -type f 2>/dev/null | head -1)
+    if [ -n "$SDY_CAPI_PATH" ] && [ -f "$SDY_CAPI_PATH" ]; then
+        cp "$SDY_CAPI_PATH" "$DEPS_DIR/lib/"
+        log_success "libsdy_capi.so installed to $DEPS_DIR/lib/ ($(du -h "$SDY_CAPI_PATH" | cut -f1))"
+    else
+        log_warn "libsdy_capi.so not found - Shardy build may have failed"
+    fi
+
+    # Copy Shardy headers
+    log_info "Installing Shardy headers..."
+    mkdir -p "$DEPS_DIR/include/shardy"
+    if [ -d "shardy/integrations/c" ]; then
+        cp -r shardy/integrations/c/*.h "$DEPS_DIR/include/shardy/" 2>/dev/null || true
+        log_success "Shardy headers installed to $DEPS_DIR/include/shardy/"
+    fi
+
+    log_success "Shardy (SDY Sharding Dialect) built and installed"
+else
+    if [ "$SKIP_XLA" = true ]; then
+        log_info "Skipping Shardy build (requires XLA, but --skip-xla was provided)"
+    else
+        log_info "Skipping Shardy build (--skip-shardy or SKIP_SHARDY=true)"
+    fi
 fi
 
 # ============================================================

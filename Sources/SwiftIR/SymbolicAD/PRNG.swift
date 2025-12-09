@@ -410,7 +410,7 @@ public func diffXavierUniform(
 
     let fanIn = Float(shape[shape.count - 2])
     let fanOut = Float(shape[shape.count - 1])
-    let limit = sqrt(6.0 / (fanIn + fanOut))
+    let limit = (6.0 / (fanIn + fanOut)).squareRoot()
 
     // Generate uniform [-limit, limit]
     let uniform = diffRandomUniform(key, shape: shape, dtype: dtype)
@@ -434,7 +434,7 @@ public func diffXavierNormal(
 
     let fanIn = Float(shape[shape.count - 2])
     let fanOut = Float(shape[shape.count - 1])
-    let stddev = sqrt(2.0 / (fanIn + fanOut))
+    let stddev = (2.0 / (fanIn + fanOut)).squareRoot()
 
     return diffRandomNormal(key, shape: shape, mean: 0, stddev: stddev, dtype: dtype)
 }
@@ -457,7 +457,7 @@ public func diffHeUniform(
     precondition(shape.count >= 2, "He init requires at least 2D tensor")
 
     let fanIn = Float(shape[shape.count - 2])
-    let limit = sqrt(6.0 / fanIn)
+    let limit = (6.0 / fanIn).squareRoot()
 
     let uniform = diffRandomUniform(key, shape: shape, dtype: dtype)
     let scaled = uniform * createConstant(2 * limit, shape: [], dtype: dtype)
@@ -481,7 +481,7 @@ public func diffHeNormal(
     precondition(shape.count >= 2, "He init requires at least 2D tensor")
 
     let fanIn = Float(shape[shape.count - 2])
-    let stddev = sqrt(2.0 / fanIn)
+    let stddev = (2.0 / fanIn).squareRoot()
 
     return diffRandomNormal(key, shape: shape, mean: 0, stddev: stddev, dtype: dtype)
 }

@@ -803,6 +803,16 @@ public struct MLIRModule {
     public let operations: [MLIROperation]
     public let results: [String]
 
+    /// Module attributes for XLA optimization hints (matches JAX output)
+    public var moduleAttributes: [String: String] = [
+        "mhlo.num_partitions": "1 : i32",
+        "mhlo.num_replicas": "1 : i32"
+    ]
+
+    /// Input-output aliases for buffer donation
+    /// When specified, XLA can reuse input buffers for outputs with matching shapes
+    public var inputOutputAliases: [InputOutputAlias] = []
+
     public init(
         functionName: String,
         arguments: [String],
@@ -815,11 +825,46 @@ public struct MLIRModule {
         self.results = results
     }
 
-    /// Generate MLIR text representation
+    /// Generate MLIR text representation with optimization attributes
     public var mlirText: String {
-        var text = "module {\n"
+        // Build module attributes string like JAX does
+        let attrString: String
+        if !moduleAttributes.isEmpty {
+            let attrs = moduleAttributes.map { "\($0.key) = \($0.value)" }.joined(separator: ", ")
+            attrString = " attributes {\(attrs)}"
+        } else {
+            attrString = ""
+        }
+
+        // Build a map of input index to output alias for argument attribute generation
+        var aliasMap: [Int: InputOutputAlias] = [:]
+        for alias in inputOutputAliases {
+            aliasMap[alias.inputIndex] = alias
+        }
+
+        var text = "module @\(functionName)_module\(attrString) {\n"
         text += "  func.func @\(functionName)("
-        text += arguments.joined(separator: ", ")
+
+        // Generate arguments with optional alias attributes
+        var argStrings: [String] = []
+        for (i, arg) in arguments.enumerated() {
+            if let alias = aliasMap[i] {
+                // Add mhlo.result_alias attribute to this argument
+                // Format: %arg0: tensor<N> {mhlo.result_alias = mhlo.result_alias<result_index = 0, must_alias = true>}
+                let parts = arg.split(separator: ":", maxSplits: 1)
+                if parts.count == 2 {
+                    let argName = String(parts[0]).trimmingCharacters(in: .whitespaces)
+                    let argType = String(parts[1]).trimmingCharacters(in: .whitespaces)
+                    let mustAliasStr = alias.mustAlias ? "true" : "false"
+                    argStrings.append("\(argName): \(argType) {mhlo.result_alias = mhlo.result_alias<result_index = \(alias.outputIndex), must_alias = \(mustAliasStr)>}")
+                } else {
+                    argStrings.append(arg)
+                }
+            } else {
+                argStrings.append(arg)
+            }
+        }
+        text += argStrings.joined(separator: ", ")
         text += ")"
 
         // Add return type if there are results
@@ -964,14 +1009,8 @@ public class StableHLOEmitter {
 
         // Special handling for scatter: generate region from scatter_computation attribute
         var regions = op.regions
-        print("DEBUG: Processing opName=\(op.opName), stablehloName=\(stablehloName), regions.isEmpty=\(regions.isEmpty)")
-        if let scatterAttr = op.attributes["scatter_computation"] {
-            print("DEBUG: Found scatter_computation=\(scatterAttr)")
-        }
         if stablehloName == "stablehlo.scatter" && regions.isEmpty {
-            print("DEBUG: Entering scatter region generation")
             if let computation = op.attributes["scatter_computation"], computation == "add" {
-                print("DEBUG: Generating add region for scatter")
                 // Generate add reduction region for scatter
                 // Extract element type from result type
                 let elementType: String
@@ -991,7 +1030,6 @@ public class StableHLOEmitter {
     stablehlo.return %sum : tensor<\(elementType)>
 """
                 regions = [region]
-                print("DEBUG: Generated region: \(region)")
             }
         }
 
@@ -1019,6 +1057,14 @@ public struct StableHLOOp {
 
     public var mlirText: String {
         var text = "\(result) = \(opName)"
+
+        // Special handling for constant operation - value comes before type
+        if opName == "stablehlo.constant" {
+            if let value = attributes["value"] {
+                text += " \(value)"
+                return text
+            }
+        }
 
         // Special handling for compare operation
         if opName == "stablehlo.compare", let direction = attributes["comparison_direction"] {
@@ -1052,9 +1098,7 @@ public struct StableHLOOp {
         text += " : \(resultType)"
 
         // Add regions if present (for operations like scatter)
-        print("DEBUG mlirText: opName=\(opName), regions.count=\(regions.count)")
         if !regions.isEmpty {
-            print("DEBUG mlirText: Adding regions")
             text += " {\n"
             for region in regions {
                 // Each region line should be indented
@@ -1070,6 +1114,23 @@ public struct StableHLOOp {
     }
 }
 
+/// Represents an input-to-output alias for buffer donation
+/// This tells XLA that an input buffer can be reused for an output with matching shape
+public struct InputOutputAlias {
+    /// Index of the input argument to donate
+    public let inputIndex: Int
+    /// Index of the output result that will reuse the input buffer
+    public let outputIndex: Int
+    /// Whether this is a must-alias (true) or may-alias (false)
+    public let mustAlias: Bool
+
+    public init(inputIndex: Int, outputIndex: Int, mustAlias: Bool = true) {
+        self.inputIndex = inputIndex
+        self.outputIndex = outputIndex
+        self.mustAlias = mustAlias
+    }
+}
+
 /// Represents a StableHLO module
 public struct StableHLOModule {
     public let functionName: String
@@ -1077,20 +1138,94 @@ public struct StableHLOModule {
     public let operations: [StableHLOOp]
     public let results: [String]
 
+    /// Input-output aliases for buffer donation
+    /// When specified, XLA can reuse input buffers for outputs with matching shapes
+    public var inputOutputAliases: [InputOutputAlias] = []
+
     public var mlirText: String {
+        // Build a map of input index to output alias for argument attribute generation
+        var aliasMap: [Int: InputOutputAlias] = [:]
+        for alias in inputOutputAliases {
+            aliasMap[alias.inputIndex] = alias
+        }
+
         var text = "module {\n"
         text += "  func.func @\(functionName)("
-        text += arguments.joined(separator: ", ")
-        text += ") {\n"
+
+        // Generate arguments with optional alias attributes
+        var argStrings: [String] = []
+        for (i, arg) in arguments.enumerated() {
+            if let alias = aliasMap[i] {
+                // Add mhlo.result_alias attribute to this argument
+                // Format: %arg0: tensor<N> {mhlo.result_alias = mhlo.result_alias<result_index = 0, must_alias = true>}
+                let parts = arg.split(separator: ":", maxSplits: 1)
+                if parts.count == 2 {
+                    let argName = String(parts[0]).trimmingCharacters(in: .whitespaces)
+                    let argType = String(parts[1]).trimmingCharacters(in: .whitespaces)
+                    let mustAliasStr = alias.mustAlias ? "true" : "false"
+                    argStrings.append("\(argName): \(argType) {mhlo.result_alias = mhlo.result_alias<result_index = \(alias.outputIndex), must_alias = \(mustAliasStr)>}")
+                } else {
+                    argStrings.append(arg)
+                }
+            } else {
+                argStrings.append(arg)
+            }
+        }
+        text += argStrings.joined(separator: ", ")
+        text += ")"
+
+        // Add return type if there are results
+        if !results.isEmpty {
+            // Get return types for all results
+            var resultTypes: [String] = []
+            for result in results {
+                if let op = operations.first(where: { $0.result == result }) {
+                    resultTypes.append(op.resultType)
+                } else {
+                    // Result might be an argument - extract type from arguments
+                    for arg in arguments {
+                        let parts = arg.split(separator: ":", maxSplits: 1)
+                        if parts.count == 2 && parts[0].trimmingCharacters(in: .whitespaces) == result {
+                            resultTypes.append(parts[1].trimmingCharacters(in: .whitespaces))
+                            break
+                        }
+                    }
+                }
+            }
+
+            if resultTypes.count == 1 {
+                text += " -> \(resultTypes[0])"
+            } else if resultTypes.count > 1 {
+                text += " -> (\(resultTypes.joined(separator: ", ")))"
+            }
+        }
+
+        text += " {\n"
 
         for op in operations {
             let opText = op.mlirText
-            print("DEBUG StableHLOModule: Adding op text:\n\(opText)")
             text += "    \(opText)\n"
         }
 
         if !results.isEmpty {
-            text += "    return \(results.joined(separator: ", "))\n"
+            // Get result types for return statement
+            var resultTypes: [String] = []
+            for result in results {
+                if let op = operations.first(where: { $0.result == result }) {
+                    resultTypes.append(op.resultType)
+                } else {
+                    // Result might be an argument - extract type from arguments
+                    for arg in arguments {
+                        let parts = arg.split(separator: ":", maxSplits: 1)
+                        if parts.count == 2 && parts[0].trimmingCharacters(in: .whitespaces) == result {
+                            resultTypes.append(parts[1].trimmingCharacters(in: .whitespaces))
+                            break
+                        }
+                    }
+                }
+            }
+
+            text += "    return \(results.joined(separator: ", ")) : \(resultTypes.joined(separator: ", "))\n"
         }
 
         text += "  }\n"
